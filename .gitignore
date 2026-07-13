@@ -1,0 +1,14 @@
+# Personal exported time data — keep out of version control,
+# but keep the empty backups/ folder so the scripts have a target.
+backups/*
+!backups/.gitkeep
+timekeeper-backup-*.json
+timekeeper-*.csv
+
+# Machine-specific launcher (each user makes/edits their own from the template)
+timekeeper.url
+
+# Windows metadata / junk
+*Zone.Identifier
+desktop.ini
+Thumbs.db

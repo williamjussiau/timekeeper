@@ -1,0 +1,975 @@
+<div id="app-root"></div>
+<style>
+  #app-root {
+    --bg: #EDEEF0;
+    --panel: #FFFFFF;
+    --ink: #1D2B3A;
+    --ink-soft: #64707C;
+    --ink-faint: #99A3AC;
+    --accent: #C08A3E;
+    --accent-dim: #EDE0C8;
+    --line: #DBDEE3;
+    --danger: #B5533C;
+    --font-display: ui-monospace, "SF Mono", "Cascadia Mono", Consolas, monospace;
+    --font-body: -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, sans-serif;
+
+    background: var(--bg);
+    color: var(--ink);
+    font-family: var(--font-body);
+    min-height: 100vh;
+    box-sizing: border-box;
+    padding: 28px 18px 60px;
+  }
+  #app-root *, #app-root *::before, #app-root *::after { box-sizing: border-box; }
+
+  .tk-wrap { max-width: 920px; margin: 0 auto; }
+
+  .tk-header {
+    display: flex; align-items: baseline; justify-content: space-between;
+    border-bottom: 1px solid var(--line); padding-bottom: 14px; margin-bottom: 22px;
+  }
+  .tk-word { font-size: 20px; font-weight: 700; letter-spacing: 0.02em; }
+  .tk-word span { color: var(--accent); }
+  .tk-date { font-family: var(--font-display); font-size: 12px; color: var(--ink-soft); }
+
+  .tk-panel {
+    background: var(--panel); border: 1px solid var(--line); border-radius: 10px;
+    padding: 20px; margin-bottom: 16px;
+  }
+  .tk-panel h2 {
+    font-size: 11px; text-transform: uppercase; letter-spacing: 0.08em;
+    color: var(--ink-soft); margin: 0 0 14px; font-weight: 600;
+  }
+
+  /* --- Timer / dial --- */
+  .tk-timer-row { display: flex; gap: 24px; align-items: center; flex-wrap: wrap; }
+  .tk-dial-box { position: relative; width: 132px; height: 132px; flex-shrink: 0; }
+  .tk-dial-box svg { width: 100%; height: 100%; transform: rotate(-90deg); }
+  .tk-dial-track { fill: none; stroke: var(--line); stroke-width: 6; }
+  .tk-dial-progress { fill: none; stroke: var(--accent); stroke-width: 6; stroke-linecap: round;
+    transition: stroke-dashoffset 0.9s linear; }
+  .tk-dial-readout {
+    position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+    font-family: var(--font-display); font-size: 17px; font-weight: 600; letter-spacing: 0.02em;
+  }
+  .tk-timer-controls { flex: 1; min-width: 220px; }
+  .tk-project-select {
+    display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 14px;
+  }
+  .tk-pill {
+    display: inline-flex; align-items: center; gap: 7px;
+    border: 1px solid var(--line); border-radius: 20px; padding: 6px 12px 6px 8px;
+    font-size: 13px; cursor: pointer; background: var(--panel); color: var(--ink);
+    transition: border-color 0.15s, background 0.15s;
+  }
+  .tk-pill.selected { border-color: var(--accent); background: var(--accent-dim); }
+  .tk-dot { width: 9px; height: 9px; border-radius: 50%; flex-shrink: 0; }
+  /* clickable colour swatch wrapping a hidden native colour input */
+  .tk-dot-pick { position: relative; display: inline-flex; align-items: center; cursor: pointer; line-height: 0; }
+  .tk-dot-pick .tk-dot { width: 12px; height: 12px; box-shadow: 0 0 0 1px var(--line); }
+  .tk-dot-pick input[type="color"] { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; cursor: pointer; border: none; padding: 0; }
+  .tk-empty { color: var(--ink-faint); font-size: 13px; }
+
+  .tk-btn {
+    font-family: var(--font-body); font-size: 13px; font-weight: 600; border: none;
+    border-radius: 7px; padding: 10px 18px; cursor: pointer; letter-spacing: 0.01em;
+  }
+  .tk-btn-start { background: var(--ink); color: #fff; }
+  .tk-btn-stop { background: var(--danger); color: #fff; }
+  .tk-btn-ghost { background: transparent; border: 1px solid var(--line); color: var(--ink-soft); }
+  .tk-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+  .tk-btn-small { padding: 6px 12px; font-size: 12px; }
+
+  .tk-running-label { font-size: 12px; color: var(--ink-soft); margin-top: 10px; min-height: 16px; }
+
+  /* --- add project row --- */
+  .tk-add-row { display: flex; gap: 8px; margin-top: 4px; }
+  .tk-input {
+    font-family: var(--font-body); font-size: 13px; border: 1px solid var(--line);
+    border-radius: 7px; padding: 8px 10px; background: var(--bg); color: var(--ink); flex: 1;
+  }
+  .tk-input:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
+
+  /* --- split chart --- */
+  .tk-tabs { display: flex; gap: 4px; }
+  .tk-tab {
+    font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; font-weight: 600;
+    padding: 5px 10px; border-radius: 6px; cursor: pointer; color: var(--ink-soft); border: 1px solid transparent;
+  }
+  .tk-tab.active { background: var(--ink); color: #fff; }
+  .tk-panel-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px; }
+  .tk-panel-head h2 { margin: 0; }
+
+  .tk-bar-row { display: grid; grid-template-columns: 120px 1fr 64px; align-items: center; gap: 10px; margin-bottom: 10px; }
+  .tk-bar-label { font-size: 13px; display: flex; align-items: center; gap: 7px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .tk-bar-track { background: var(--bg); border-radius: 4px; height: 10px; overflow: hidden; }
+  .tk-bar-fill { height: 100%; border-radius: 4px; transition: width 0.4s ease; }
+  .tk-bar-val { font-family: var(--font-display); font-size: 12px; color: var(--ink-soft); text-align: right; }
+
+  /* --- log --- */
+  .tk-log-row {
+    display: grid; grid-template-columns: 10px 1fr auto auto auto auto; align-items: center; gap: 12px;
+    padding: 9px 0; border-bottom: 1px solid var(--line); font-size: 13px;
+  }
+  .tk-log-row:last-child { border-bottom: none; }
+  .tk-log-proj { color: var(--ink); }
+  .tk-log-note { color: var(--ink-faint); font-size: 11px; display: block; margin-top: 2px; }
+  .tk-log-date { color: var(--ink-faint); font-size: 11px; font-family: var(--font-display); }
+  .tk-log-dur { font-family: var(--font-display); font-size: 12px; color: var(--ink-soft); }
+  .tk-log-del { background: none; border: none; color: var(--ink-faint); cursor: pointer; font-size: 15px; padding: 0 4px; }
+  .tk-log-del:hover { color: var(--danger); }
+
+  .tk-manual-toggle { font-size: 12px; color: var(--ink-soft); cursor: pointer; text-decoration: underline; text-underline-offset: 2px; background:none; border:none; padding:0; }
+  .tk-manual-form { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; margin-top: 12px; }
+  .tk-manual-form label { font-size: 11px; color: var(--ink-soft); display:block; margin-bottom: 4px; }
+
+  .tk-footnote { font-size: 11px; color: var(--ink-faint); text-align: center; margin-top: 18px; }
+
+  /* --- project cards & task rows --- */
+  .tk-proj-card { background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 12px 14px; margin-bottom: 12px; }
+  .tk-proj-card:last-child { margin-bottom: 0; }
+  .tk-proj-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
+  .tk-proj-title { display: flex; align-items: center; gap: 8px; font-weight: 600; font-size: 14px; }
+  .tk-task-row { display: grid; grid-template-columns: 1fr auto auto auto; align-items: center; gap: 10px; padding: 6px 0; border-bottom: 1px solid var(--line); }
+  .tk-task-row:last-of-type { border-bottom: none; }
+  .tk-task-row.running { background: var(--accent-dim); border-radius: 6px; padding-left: 8px; padding-right: 8px; }
+  .tk-task-name { font-size: 13px; }
+  .tk-task-today { font-family: var(--font-display); font-size: 12px; color: var(--ink-soft); min-width: 52px; text-align: right; }
+
+  /* --- today summary --- */
+  .tk-sum-group { margin-bottom: 12px; }
+  .tk-sum-group:last-child { margin-bottom: 0; }
+  .tk-sum-head { display: flex; align-items: center; justify-content: space-between; font-weight: 600; font-size: 13px; padding-bottom: 4px; border-bottom: 1px solid var(--line); margin-bottom: 4px; }
+  .tk-sum-task { display: flex; align-items: center; justify-content: space-between; font-size: 13px; padding: 3px 0 3px 17px; color: var(--ink-soft); }
+
+  /* --- pie / donut chart --- */
+  .tk-chart-controls { display: flex; align-items: center; gap: 12px; }
+  .tk-pie-toggle { display: inline-flex; align-items: center; gap: 5px; font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; font-weight: 600; color: var(--ink-soft); cursor: pointer; }
+  .tk-pie-toggle input { cursor: pointer; }
+  .tk-pie-wrap { display: flex; gap: 24px; align-items: center; flex-wrap: wrap; }
+  .tk-pie { width: 148px; height: 148px; flex-shrink: 0; transform: rotate(-90deg); }
+  .tk-legend { flex: 1; min-width: 200px; }
+  .tk-legend-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 5px 0; border-bottom: 1px solid var(--line); font-size: 13px; }
+  .tk-legend-row:last-child { border-bottom: none; }
+
+  /* --- backup --- */
+  .tk-backup-row { display: flex; gap: 8px; flex-wrap: wrap; }
+  .tk-backup-age { font-size: 11px; color: var(--ink-soft); font-family: var(--font-display); }
+  .tk-backup-age.stale { color: var(--danger); font-weight: 600; }
+  .tk-explain { margin-top: 12px; font-size: 12px; color: var(--ink-soft); }
+  .tk-explain summary { cursor: pointer; color: var(--accent); font-weight: 600; }
+  .tk-explain p { margin: 8px 0; line-height: 1.5; }
+  .tk-explain ul { margin: 8px 0; padding-left: 18px; }
+  .tk-explain li { margin: 4px 0; line-height: 1.5; }
+  .tk-explain strong { color: var(--ink); }
+
+  /* --- project card controls --- */
+  .tk-proj-actions { display: flex; align-items: center; gap: 2px; }
+  .tk-caret { background: none; border: none; color: var(--ink-soft); cursor: pointer; font-size: 12px; padding: 0 4px 0 0; }
+  .tk-icon-btn { background: none; border: none; color: var(--ink-faint); cursor: pointer; font-size: 11px; padding: 0 3px; line-height: 1; }
+  .tk-icon-btn:hover:not(:disabled) { color: var(--ink); }
+  .tk-icon-btn:disabled { opacity: 0.25; cursor: default; }
+  [data-rename-project], [data-rename-task] { cursor: pointer; }
+  [data-rename-project]:hover, [data-rename-task]:hover { text-decoration: underline; text-underline-offset: 2px; }
+
+  /* --- day stats + target --- */
+  .tk-day-stats { font-size: 12px; color: var(--ink-soft); }
+  .tk-day-stats b { color: var(--ink); font-family: var(--font-display); }
+  .tk-target-row { display: flex; align-items: center; gap: 12px; margin-bottom: 14px; }
+  .tk-target-label { font-size: 12px; color: var(--ink-soft); display: flex; align-items: center; gap: 8px; white-space: nowrap; }
+  .tk-target-input { width: 70px; flex: none; }
+  .tk-kbd-hint { font-size: 11px; color: var(--ink-faint); margin-left: 8px; }
+
+  /* --- inline entry editor --- */
+  .tk-log-edit { padding: 10px 0; border-bottom: 1px solid var(--line); }
+  .tk-edit-fields { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+  .tk-edit-fields .tk-input { flex: 1 1 auto; min-width: 110px; }
+
+  @media (max-width: 600px) {
+    .tk-manual-form { grid-template-columns: 1fr 1fr; }
+    .tk-bar-row { grid-template-columns: 90px 1fr 54px; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .tk-dial-progress, .tk-bar-fill { transition: none; }
+  }
+</style>
+
+<script>
+(function(){
+  const PALETTE = ['#C08A3E','#4A7C82','#8B5FBF','#6B8E4E','#B5533C','#3D6E8C','#A67C52','#5C6B73'];
+  let projects = [];   // {id, name, color}
+  let tasks = [];      // {id, projectId, name}
+  let entries = [];    // {id, projectId, taskId, start, end, note}
+  let activeTimer = null; // {projectId, taskId, start}
+  let chartPeriod = 'today';
+  let chartType = 'bar'; // 'bar' | 'pie'
+  let manualFormOpen = false;
+  let manualProjectId = null; // which project is selected in the manual-entry form
+  let tickHandle = null;
+  let editingEntryId = null;   // log entry currently being edited inline
+  let collapsed = {};          // projectId -> true when its card is collapsed
+  let dailyTargetHours = 0;    // 0 = no target set
+  let lastTask = null;         // {projectId, taskId} last tracked, for "resume"
+  let lastBackup = null;       // ISO timestamp of last export
+
+  const root = document.getElementById('app-root');
+
+  function uid(){ return Date.now().toString(36) + Math.random().toString(36).slice(2,7); }
+
+  function storageGet(key){
+    try { const v = localStorage.getItem(key); return v ? JSON.parse(v) : null; }
+    catch(e){ return null; }
+  }
+  function storageSet(key, val){
+    try { localStorage.setItem(key, JSON.stringify(val)); } catch(e){ /* ignore */ }
+  }
+
+  function loadAll(){
+    projects = storageGet('tk-projects') || [];
+    tasks = storageGet('tk-tasks') || [];
+    entries = storageGet('tk-entries') || [];
+    activeTimer = storageGet('tk-active-timer') || null;
+    collapsed = storageGet('tk-collapsed') || {};
+    dailyTargetHours = storageGet('tk-daily-target') || 0;
+    lastTask = storageGet('tk-last-task') || null;
+    lastBackup = storageGet('tk-last-backup') || null;
+    migrateToTasks();
+    guardStaleTimer();
+    render();
+    updateTitle();
+    if (activeTimer) startTicking();
+    document.addEventListener('keydown', onKeydown);
+  }
+
+  // If a timer has been left running for a very long time (>= 8h) or across a
+  // day boundary, the user most likely forgot to stop it. Ask what to log
+  // instead of silently counting the whole stretch.
+  function guardStaleTimer(){
+    if (!activeTimer) return;
+    const start = new Date(activeTimer.start);
+    const elapsedH = (Date.now() - start) / 3600000;
+    const crossedDay = startOfDay(new Date()).getTime() !== startOfDay(start).getTime();
+    if (elapsedH < 8 && !crossedDay) return;
+    const p = projects.find(pr => pr.id === activeTimer.projectId);
+    const t = tasks.find(tk => tk.id === activeTimer.taskId);
+    const name = [p && p.name, t && t.name].filter(Boolean).join(' · ') || 'a task';
+    const ans = prompt(
+      'A timer for "' + name + '" has been running since ' + start.toLocaleString() +
+      ' (' + Math.floor(elapsedH) + 'h). You may have forgotten to stop it.\n\n' +
+      'How many hours should we log for this session?\n' +
+      '(0 or blank = discard it · Cancel = keep it running)', '1');
+    if (ans === null) return; // keep running
+    const hrs = parseFloat(ans);
+    if (hrs && hrs > 0){
+      const end = new Date(start.getTime() + hrs * 3600000);
+      entries.push({ id: uid(), projectId: activeTimer.projectId, taskId: activeTimer.taskId, start: activeTimer.start, end: end.toISOString(), note: '(auto: forgot to stop)' });
+      storageSet('tk-entries', entries);
+    }
+    activeTimer = null;
+    storageSet('tk-active-timer', null);
+  }
+
+  function onKeydown(ev){
+    const tag = (ev.target && ev.target.tagName || '').toLowerCase();
+    if (tag === 'input' || tag === 'select' || tag === 'textarea') return;
+    if (ev.key === 'Escape' && activeTimer){ ev.preventDefault(); stopTimer(); }
+  }
+
+  function updateTitle(){
+    if (activeTimer){
+      const elapsed = (Date.now() - new Date(activeTimer.start)) / 1000;
+      const t = tasks.find(tk => tk.id === activeTimer.taskId);
+      document.title = '▶ ' + fmtHMS(elapsed) + (t ? ' · ' + t.name : '');
+    } else {
+      document.title = 'Timekeeper';
+    }
+  }
+
+  // Older data tracked time against projects only (no taskId). For any project
+  // that has entries/timer but no task, create a "General" task and attach the
+  // orphaned records to it, so nothing that was already tracked is lost.
+  function migrateToTasks(){
+    let changed = false;
+    const generalFor = {}; // projectId -> task id
+    function ensureGeneral(projectId){
+      if (generalFor[projectId]) return generalFor[projectId];
+      let t = tasks.find(tk => tk.projectId === projectId && tk.name === 'General');
+      if (!t){ t = { id: uid(), projectId, name: 'General' }; tasks.push(t); changed = true; }
+      generalFor[projectId] = t.id;
+      return t.id;
+    }
+    entries.forEach(e => {
+      if (!e.taskId && e.projectId){ e.taskId = ensureGeneral(e.projectId); changed = true; }
+    });
+    if (activeTimer && !activeTimer.taskId && activeTimer.projectId){
+      activeTimer.taskId = ensureGeneral(activeTimer.projectId);
+      storageSet('tk-active-timer', activeTimer);
+    }
+    if (changed){ storageSet('tk-tasks', tasks); storageSet('tk-entries', entries); }
+  }
+
+  function fmtHMS(totalSeconds){
+    const h = Math.floor(totalSeconds/3600);
+    const m = Math.floor((totalSeconds%3600)/60);
+    const s = Math.floor(totalSeconds%60);
+    return [h,m,s].map(v=>String(v).padStart(2,'0')).join(':');
+  }
+  function fmtHM(totalSeconds){
+    const h = Math.floor(totalSeconds/3600);
+    const m = Math.round((totalSeconds%3600)/60);
+    return h + 'h ' + String(m).padStart(2,'0') + 'm';
+  }
+  function startOfWeek(d){
+    const dt = new Date(d); const day = (dt.getDay()+6)%7; // Monday=0
+    dt.setHours(0,0,0,0); dt.setDate(dt.getDate()-day); return dt;
+  }
+  function startOfDay(d){ const dt = new Date(d); dt.setHours(0,0,0,0); return dt; }
+  function fmtDateInput(d){ return d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0'); }
+  function fmtTimeInput(d){ return String(d.getHours()).padStart(2,'0') + ':' + String(d.getMinutes()).padStart(2,'0'); }
+
+  function durationOf(entry){
+    return Math.max(0, (new Date(entry.end) - new Date(entry.start))/1000);
+  }
+
+  function entriesForPeriod(period){
+    const now = new Date();
+    let from = null;
+    if (period === 'today') from = startOfDay(now);
+    else if (period === 'week') from = startOfWeek(now);
+    return entries.filter(e => !from || new Date(e.end) >= from);
+  }
+
+  function startTimer(projectId, taskId){
+    if (!projectId || !taskId) return;
+    if (activeTimer) stopTimer(true); // switching tasks pauses the previous one
+    activeTimer = { projectId, taskId, start: new Date().toISOString() };
+    lastTask = { projectId, taskId };
+    storageSet('tk-active-timer', activeTimer);
+    storageSet('tk-last-task', lastTask);
+    startTicking();
+    updateTitle();
+    render();
+  }
+  function stopTimer(skipRender){
+    if (!activeTimer) return;
+    const entry = { id: uid(), projectId: activeTimer.projectId, taskId: activeTimer.taskId, start: activeTimer.start, end: new Date().toISOString(), note: '' };
+    if (durationOf(entry) >= 5) entries.push(entry); // ignore accidental sub-5s taps
+    activeTimer = null;
+    stopTicking();
+    storageSet('tk-entries', entries);
+    storageSet('tk-active-timer', null);
+    updateTitle();
+    if (!skipRender) render();
+  }
+  function startTicking(){
+    stopTicking();
+    tickHandle = setInterval(updateDialOnly, 1000);
+  }
+  function stopTicking(){
+    if (tickHandle) clearInterval(tickHandle);
+    tickHandle = null;
+  }
+
+  function addProject(name, color){
+    name = name.trim();
+    if (!name) return;
+    color = color || PALETTE[projects.length % PALETTE.length];
+    const proj = { id: uid(), name, color };
+    projects.push(proj);
+    storageSet('tk-projects', projects);
+    render();
+  }
+  function setProjectColor(id, color){
+    const p = projects.find(pr => pr.id === id);
+    if (!p || !color) return;
+    p.color = color;
+    storageSet('tk-projects', projects);
+    render();
+  }
+  function nextColor(){ return PALETTE[projects.length % PALETTE.length]; }
+  function addTask(projectId, name){
+    name = name.trim();
+    if (!projectId || !name) return;
+    tasks.push({ id: uid(), projectId, name });
+    storageSet('tk-tasks', tasks);
+    render();
+  }
+  function deleteProject(id){
+    const p = projects.find(pr => pr.id === id);
+    if (!confirm('Delete project "' + (p ? p.name : '') + '" and its tasks? Logged time is kept in the history.')) return;
+    if (activeTimer && activeTimer.projectId === id) stopTimer(true);
+    projects = projects.filter(pr => pr.id !== id);
+    tasks = tasks.filter(t => t.projectId !== id);
+    storageSet('tk-projects', projects);
+    storageSet('tk-tasks', tasks);
+    render();
+  }
+  function deleteTask(id){
+    const t = tasks.find(tk => tk.id === id);
+    if (!confirm('Delete task "' + (t ? t.name : '') + '"? Logged time is kept in the history.')) return;
+    if (activeTimer && activeTimer.taskId === id) stopTimer(true);
+    tasks = tasks.filter(tk => tk.id !== id);
+    storageSet('tk-tasks', tasks);
+    render();
+  }
+  function renameProject(id){
+    const p = projects.find(pr => pr.id === id); if (!p) return;
+    const name = prompt('Rename project', p.name);
+    if (name === null) return;
+    const n = name.trim(); if (!n) return;
+    p.name = n; storageSet('tk-projects', projects); render();
+  }
+  function renameTask(id){
+    const t = tasks.find(tk => tk.id === id); if (!t) return;
+    const name = prompt('Rename task', t.name);
+    if (name === null) return;
+    const n = name.trim(); if (!n) return;
+    t.name = n; storageSet('tk-tasks', tasks); render();
+  }
+  function moveProject(id, dir){
+    const i = projects.findIndex(p => p.id === id); if (i < 0) return;
+    const j = i + dir; if (j < 0 || j >= projects.length) return;
+    const tmp = projects[i]; projects[i] = projects[j]; projects[j] = tmp;
+    storageSet('tk-projects', projects); render();
+  }
+  function toggleCollapse(id){
+    collapsed[id] = !collapsed[id];
+    storageSet('tk-collapsed', collapsed); render();
+  }
+  function setDailyTarget(hours){
+    dailyTargetHours = (hours && hours > 0) ? hours : 0;
+    storageSet('tk-daily-target', dailyTargetHours); render();
+  }
+  function deleteEntry(id){
+    entries = entries.filter(e => e.id !== id);
+    if (editingEntryId === id) editingEntryId = null;
+    storageSet('tk-entries', entries);
+    render();
+  }
+  function updateEntry(id, dateStr, startStr, endStr, note){
+    const e = entries.find(x => x.id === id); if (!e) return;
+    if (!dateStr || !startStr || !endStr){ alert('Date, start and end are all required.'); return; }
+    const start = new Date(dateStr + 'T' + startStr);
+    const end = new Date(dateStr + 'T' + endStr);
+    if (end <= start){ alert('End time must be after start time.'); return; }
+    e.start = start.toISOString(); e.end = end.toISOString(); e.note = note || '';
+    editingEntryId = null;
+    storageSet('tk-entries', entries);
+    render();
+  }
+  function addManualEntry(projectId, taskId, dateStr, startStr, endStr, note){
+    if (!projectId || !taskId || !dateStr || !startStr || !endStr) return;
+    const start = new Date(dateStr + 'T' + startStr);
+    let end = new Date(dateStr + 'T' + endStr);
+    if (end <= start) return;
+    entries.push({ id: uid(), projectId, taskId, start: start.toISOString(), end: end.toISOString(), note: note||'' });
+    storageSet('tk-entries', entries);
+    manualFormOpen = false;
+    render();
+  }
+
+  function downloadBlob(blob, filename){
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = filename;
+    document.body.appendChild(a); a.click(); a.remove();
+    URL.revokeObjectURL(url);
+  }
+  function markBackup(){
+    lastBackup = new Date().toISOString();
+    storageSet('tk-last-backup', lastBackup);
+  }
+  function exportData(){
+    const payload = { version: 1, exportedAt: new Date().toISOString(), projects, tasks, entries };
+    downloadBlob(new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' }),
+      'timekeeper-backup-' + new Date().toISOString().slice(0,10) + '.json');
+    markBackup(); render();
+  }
+  function csvCell(v){ v = String(v == null ? '' : v); return /[",\n\r]/.test(v) ? '"' + v.replace(/"/g,'""') + '"' : v; }
+  function exportCSV(){
+    const rows = [['Project','Task','Date','Start','End','Hours','Note']];
+    [...entries].sort((a,b) => new Date(a.start) - new Date(b.start)).forEach(e => {
+      const p = projects.find(pr => pr.id === e.projectId);
+      const t = tasks.find(tk => tk.id === e.taskId);
+      const s = new Date(e.start), en = new Date(e.end);
+      rows.push([
+        p ? p.name : '(deleted project)', t ? t.name : '(deleted task)',
+        s.toLocaleDateString(), s.toLocaleTimeString(), en.toLocaleTimeString(),
+        (durationOf(e)/3600).toFixed(2), e.note || ''
+      ]);
+    });
+    const csv = rows.map(r => r.map(csvCell).join(',')).join('\r\n');
+    downloadBlob(new Blob([csv], { type: 'text/csv' }), 'timekeeper-' + new Date().toISOString().slice(0,10) + '.csv');
+    markBackup(); render();
+  }
+  function backupAge(){
+    if (!lastBackup) return { text: 'No backup yet — export now to be safe.', stale: true };
+    const days = Math.floor((Date.now() - new Date(lastBackup)) / 86400000);
+    const when = days <= 0 ? 'today' : (days + ' day' + (days > 1 ? 's' : '') + ' ago');
+    return { text: 'Last backup: ' + when, stale: days >= 7 };
+  }
+  function importData(file){
+    const reader = new FileReader();
+    reader.onload = () => {
+      let data;
+      try { data = JSON.parse(reader.result); } catch(e){ alert('That file is not valid JSON.'); return; }
+      if (!data || !Array.isArray(data.projects) || !Array.isArray(data.tasks) || !Array.isArray(data.entries)){
+        alert('This does not look like a Timekeeper backup (missing projects/tasks/entries).');
+        return;
+      }
+      if (!confirm('Replace ALL current data with the contents of this backup? This cannot be undone.')) return;
+      if (activeTimer) stopTimer(true);
+      projects = data.projects; tasks = data.tasks; entries = data.entries;
+      storageSet('tk-projects', projects);
+      storageSet('tk-tasks', tasks);
+      storageSet('tk-entries', entries);
+      migrateToTasks();
+      render();
+    };
+    reader.readAsText(file);
+  }
+
+  function updateDialOnly(){
+    const dial = document.getElementById('tk-dial-progress');
+    const readout = document.getElementById('tk-dial-readout');
+    if (!dial || !activeTimer) return;
+    const elapsed = (Date.now() - new Date(activeTimer.start))/1000;
+    const sweep = elapsed % 60;
+    const circumference = 2 * Math.PI * 58;
+    dial.style.strokeDashoffset = circumference * (1 - sweep/60);
+    if (readout) readout.textContent = fmtHMS(elapsed);
+    const label = document.getElementById('tk-running-label');
+    if (label){
+      const p = projects.find(pr => pr.id === activeTimer.projectId);
+      const t = tasks.find(tk => tk.id === activeTimer.taskId);
+      const name = [p && p.name, t && t.name].filter(Boolean).join(' · ');
+      label.textContent = name ? ('Tracking ' + name + ' since ' + new Date(activeTimer.start).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'})) : '';
+    }
+    updateTitle();
+  }
+
+  function render(){
+    const today = new Date();
+    const dateStr = today.toLocaleDateString(undefined, { weekday:'long', month:'short', day:'numeric' });
+
+    // dial initial state
+    const circumference = 2 * Math.PI * 58;
+    let elapsed = 0;
+    if (activeTimer) elapsed = (Date.now() - new Date(activeTimer.start))/1000;
+    const sweep = elapsed % 60;
+    const dialOffset = circumference * (1 - sweep/60);
+
+    // today's tracked seconds per task (incl. the live timer)
+    const todayFrom = startOfDay(new Date());
+    const weekFrom = startOfWeek(new Date());
+    const todaySecByTask = {};
+    let weekTotalSec = 0;
+    entries.forEach(e => {
+      if (new Date(e.end) >= todayFrom) todaySecByTask[e.taskId] = (todaySecByTask[e.taskId]||0) + durationOf(e);
+      if (new Date(e.end) >= weekFrom) weekTotalSec += durationOf(e);
+    });
+    if (activeTimer){
+      const live = (Date.now() - new Date(activeTimer.start))/1000;
+      todaySecByTask[activeTimer.taskId] = (todaySecByTask[activeTimer.taskId]||0) + live;
+      weekTotalSec += live;
+    }
+    const todayTotalSec = Object.values(todaySecByTask).reduce((s,v) => s + v, 0);
+    const targetSec = dailyTargetHours * 3600;
+    const targetPct = targetSec ? Math.min(100, todayTotalSec/targetSec*100) : 0;
+
+    // resume target: the last task tracked, if it still exists
+    const resume = (!activeTimer && lastTask && projects.some(p => p.id === lastTask.projectId) && tasks.some(t => t.id === lastTask.taskId)) ? lastTask : null;
+    const resumeName = resume ? (tasks.find(t => t.id === resume.taskId) || {}).name : '';
+
+    // --- Projects & tasks list ---
+    const projectCards = projects.length ? projects.map((p, idx) => {
+      const isCollapsed = !!collapsed[p.id];
+      const myTasks = tasks.filter(t => t.projectId === p.id);
+      const projTodaySec = myTasks.reduce((s,t) => s + (todaySecByTask[t.id]||0), 0);
+      const taskRows = myTasks.length ? myTasks.map(t => {
+        const running = activeTimer && activeTimer.taskId === t.id;
+        const todaySec = todaySecByTask[t.id] || 0;
+        return `<div class="tk-task-row ${running?'running':''}">
+          <span class="tk-task-name" data-rename-task="${t.id}" title="Click to rename">${escapeHtml(t.name)}</span>
+          <span class="tk-task-today">${todaySec ? fmtHM(todaySec) : ''}</span>
+          ${running
+            ? `<button class="tk-btn tk-btn-stop tk-btn-small" data-stop-task="1">Stop</button>`
+            : `<button class="tk-btn tk-btn-start tk-btn-small" data-start-project="${p.id}" data-start-task="${t.id}">Start</button>`}
+          <button class="tk-log-del" data-del-task="${t.id}" title="Delete task">✕</button>
+        </div>`;
+      }).join('') : `<div class="tk-empty" style="padding:4px 0;">No tasks yet — add one below.</div>`;
+      const body = isCollapsed ? '' : `
+        ${taskRows}
+        <div class="tk-add-row">
+          <input class="tk-input" data-new-task="${p.id}" placeholder="New task (e.g. Meetings)"/>
+          <button class="tk-btn tk-btn-ghost tk-btn-small" data-add-task="${p.id}">Add task</button>
+        </div>`;
+      return `<div class="tk-proj-card" style="border-left:3px solid ${p.color}">
+        <div class="tk-proj-head">
+          <div class="tk-proj-title">
+            <button class="tk-caret" data-collapse="${p.id}" title="${isCollapsed?'Expand':'Collapse'}">${isCollapsed?'▸':'▾'}</button>
+            <label class="tk-dot-pick" title="Change colour">
+              <span class="tk-dot" style="background:${p.color}"></span>
+              <input type="color" value="${p.color}" data-color-project="${p.id}"/>
+            </label>
+            <span data-rename-project="${p.id}" title="Click to rename">${escapeHtml(p.name)}</span>
+            ${isCollapsed && projTodaySec ? `<span class="tk-task-today" style="font-weight:400;">${fmtHM(projTodaySec)}</span>` : ''}
+          </div>
+          <div class="tk-proj-actions">
+            <button class="tk-icon-btn" data-move-project="${p.id}" data-dir="-1" title="Move up" ${idx===0?'disabled':''}>▲</button>
+            <button class="tk-icon-btn" data-move-project="${p.id}" data-dir="1" title="Move down" ${idx===projects.length-1?'disabled':''}>▼</button>
+            <button class="tk-log-del" data-del-project="${p.id}" title="Delete project">✕</button>
+          </div>
+        </div>
+        ${body}
+      </div>`;
+    }).join('') : `<div class="tk-empty">No projects yet — add one above to start tracking.</div>`;
+
+    // --- Today summary (grouped project -> task) ---
+    const todayGroups = projects.map(p => {
+      const rows = tasks.filter(t => t.projectId === p.id && todaySecByTask[t.id])
+        .sort((a,b) => todaySecByTask[b.id]-todaySecByTask[a.id])
+        .map(t => `<div class="tk-sum-task"><span>${escapeHtml(t.name)}</span><span class="tk-log-dur">${fmtHM(todaySecByTask[t.id])}</span></div>`).join('');
+      if (!rows) return '';
+      const total = tasks.filter(t => t.projectId === p.id).reduce((s,t) => s + (todaySecByTask[t.id]||0), 0);
+      return `<div class="tk-sum-group">
+        <div class="tk-sum-head"><span class="tk-bar-label"><span class="tk-dot" style="background:${p.color}"></span>${escapeHtml(p.name)}</span><span class="tk-log-dur">${fmtHM(total)}</span></div>
+        ${rows}
+      </div>`;
+    }).join('');
+    const todaySummary = todayGroups || `<div class="tk-empty">Nothing tracked today yet.</div>`;
+
+    // --- Split-by-project bar chart ---
+    const chartEntries = entriesForPeriod(chartPeriod);
+    const totalsByProject = {};
+    let maxTotal = 0;
+    chartEntries.forEach(e => {
+      totalsByProject[e.projectId] = (totalsByProject[e.projectId]||0) + durationOf(e);
+    });
+    if (activeTimer) {
+      const live = (Date.now() - new Date(activeTimer.start))/1000;
+      totalsByProject[activeTimer.projectId] = (totalsByProject[activeTimer.projectId]||0) + live;
+    }
+    Object.values(totalsByProject).forEach(v => { if (v > maxTotal) maxTotal = v; });
+
+    const chartProjects = projects.filter(p => totalsByProject[p.id]).sort((a,b)=> (totalsByProject[b.id]||0)-(totalsByProject[a.id]||0));
+    const grandTotal = chartProjects.reduce((s,p) => s + totalsByProject[p.id], 0);
+
+    const barRows = chartProjects.map(p => {
+      const val = totalsByProject[p.id] || 0;
+      const pct = maxTotal ? (val/maxTotal*100) : 0;
+      return `<div class="tk-bar-row">
+        <div class="tk-bar-label"><span class="tk-dot" style="background:${p.color}"></span>${escapeHtml(p.name)}</div>
+        <div class="tk-bar-track"><div class="tk-bar-fill" style="width:${pct}%;background:${p.color}"></div></div>
+        <div class="tk-bar-val">${fmtHM(val)}</div>
+      </div>`;
+    }).join('') || `<div class="tk-empty">No time logged for this period yet.</div>`;
+
+    // donut (inline SVG, no chart library) + legend
+    const R = 52, CIRC = 2 * Math.PI * R;
+    let cumFrac = 0;
+    const donutArcs = chartProjects.map(p => {
+      const frac = grandTotal ? totalsByProject[p.id]/grandTotal : 0;
+      const dash = frac * CIRC;
+      const arc = `<circle cx="66" cy="66" r="${R}" fill="none" stroke="${p.color}" stroke-width="20"
+        stroke-dasharray="${dash} ${CIRC - dash}" stroke-dashoffset="${-cumFrac * CIRC}"></circle>`;
+      cumFrac += frac;
+      return arc;
+    }).join('');
+    const donutLegend = chartProjects.map(p => {
+      const val = totalsByProject[p.id] || 0;
+      const pct = grandTotal ? Math.round(val/grandTotal*100) : 0;
+      return `<div class="tk-legend-row">
+        <span class="tk-bar-label"><span class="tk-dot" style="background:${p.color}"></span>${escapeHtml(p.name)}</span>
+        <span class="tk-bar-val">${fmtHM(val)} · ${pct}%</span>
+      </div>`;
+    }).join('');
+    const pieChart = chartProjects.length ? `
+      <div class="tk-pie-wrap">
+        <svg class="tk-pie" viewBox="0 0 132 132">${donutArcs}</svg>
+        <div class="tk-legend">${donutLegend}</div>
+      </div>` : `<div class="tk-empty">No time logged for this period yet.</div>`;
+
+    // --- Log ---
+    const sortedEntries = [...entries].sort((a,b) => new Date(b.start) - new Date(a.start)).slice(0, 25);
+    const logRows = sortedEntries.length ? sortedEntries.map(e => {
+      const p = projects.find(pr => pr.id === e.projectId);
+      const t = tasks.find(tk => tk.id === e.taskId);
+      const s = new Date(e.start), en = new Date(e.end);
+      const label = [p ? escapeHtml(p.name) : '(deleted project)', t ? escapeHtml(t.name) : '(deleted task)'].join(' · ');
+      if (editingEntryId === e.id){
+        return `<div class="tk-log-edit" data-edit-row="${e.id}">
+          <div class="tk-log-proj">${label}</div>
+          <div class="tk-edit-fields">
+            <input class="tk-input" type="date" data-ef="date" value="${fmtDateInput(s)}"/>
+            <input class="tk-input" type="time" data-ef="start" value="${fmtTimeInput(s)}"/>
+            <input class="tk-input" type="time" data-ef="end" value="${fmtTimeInput(en)}"/>
+            <input class="tk-input" data-ef="note" placeholder="Note (optional)" value="${escapeHtml(e.note||'')}"/>
+            <button class="tk-btn tk-btn-start tk-btn-small" data-save-entry="${e.id}">Save</button>
+            <button class="tk-btn tk-btn-ghost tk-btn-small" data-cancel-entry="1">Cancel</button>
+          </div>
+        </div>`;
+      }
+      return `<div class="tk-log-row">
+        <span class="tk-dot" style="background:${p?p.color:'#ccc'}"></span>
+        <div class="tk-log-proj">${label}${e.note ? `<span class="tk-log-note">${escapeHtml(e.note)}</span>` : ''}</div>
+        <div class="tk-log-date">${s.toLocaleDateString(undefined,{month:'short',day:'numeric'})} · ${s.toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'})}</div>
+        <div class="tk-log-dur">${fmtHM(durationOf(e))}</div>
+        <button class="tk-log-del" data-edit-entry="${e.id}" title="Edit entry">✎</button>
+        <button class="tk-log-del" data-del-entry="${e.id}" title="Delete entry">✕</button>
+      </div>`;
+    }).join('') : `<div class="tk-empty">No entries logged yet.</div>`;
+
+    // manual-entry form dropdowns
+    if (manualProjectId === null || !projects.some(p => p.id === manualProjectId)) manualProjectId = projects.length ? projects[0].id : null;
+    const projectOptions = projects.map(p => `<option value="${p.id}" ${p.id===manualProjectId?'selected':''}>${escapeHtml(p.name)}</option>`).join('');
+    const taskOptions = tasks.filter(t => t.projectId === manualProjectId).map(t => `<option value="${t.id}">${escapeHtml(t.name)}</option>`).join('');
+
+    root.innerHTML = `
+      <div class="tk-wrap">
+        <div class="tk-header">
+          <div class="tk-word">Time<span>keeper</span></div>
+          <div class="tk-date">${dateStr}</div>
+        </div>
+
+        <div class="tk-panel">
+          <h2>Current session</h2>
+          <div class="tk-timer-row">
+            <div class="tk-dial-box">
+              <svg viewBox="0 0 132 132">
+                <circle class="tk-dial-track" cx="66" cy="66" r="58"></circle>
+                <circle id="tk-dial-progress" class="tk-dial-progress" cx="66" cy="66" r="58"
+                  stroke-dasharray="${circumference}" stroke-dashoffset="${dialOffset}"></circle>
+              </svg>
+              <div id="tk-dial-readout" class="tk-dial-readout">${fmtHMS(elapsed)}</div>
+            </div>
+            <div class="tk-timer-controls">
+              ${activeTimer
+                ? `<button class="tk-btn tk-btn-stop" id="tk-stop-btn">Stop tracking</button>
+                   <span class="tk-kbd-hint">or press Esc</span>`
+                : `<div class="tk-empty">Not tracking. Press <strong>Start</strong> on any task below.</div>
+                   ${resume ? `<button class="tk-btn tk-btn-start tk-btn-small" id="tk-resume-btn" style="margin-top:10px;">▶ Resume ${escapeHtml(resumeName)}</button>` : ''}`}
+              <div id="tk-running-label" class="tk-running-label"></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="tk-panel">
+          <div class="tk-panel-head">
+            <h2>Projects &amp; tasks</h2>
+          </div>
+          <div class="tk-add-row" style="margin-bottom:14px;">
+            <label class="tk-dot-pick" title="Pick colour">
+              <span class="tk-dot" id="tk-new-project-swatch" style="background:${nextColor()}"></span>
+              <input type="color" id="tk-new-project-color" value="${nextColor()}"/>
+            </label>
+            <input class="tk-input" id="tk-new-project" placeholder="New project name"/>
+            <button class="tk-btn tk-btn-ghost tk-btn-small" id="tk-add-project-btn">Add project</button>
+          </div>
+          ${projectCards}
+        </div>
+
+        <div class="tk-panel">
+          <div class="tk-panel-head">
+            <h2>Today</h2>
+            <div class="tk-day-stats">Today <b>${fmtHM(todayTotalSec)}</b> · This week <b>${fmtHM(weekTotalSec)}</b></div>
+          </div>
+          <div class="tk-target-row">
+            <label class="tk-target-label">Daily target (h)
+              <input class="tk-input tk-target-input" type="number" min="0" step="0.5" id="tk-daily-target" value="${dailyTargetHours || ''}" placeholder="—"/>
+            </label>
+            ${targetSec ? `<div class="tk-bar-track" style="flex:1;"><div class="tk-bar-fill" style="width:${targetPct}%;background:${targetPct>=100?'#6B8E4E':'var(--accent)'}"></div></div>
+            <span class="tk-bar-val">${Math.round(targetPct)}%</span>` : `<span class="tk-empty">Set a target to see daily progress.</span>`}
+          </div>
+          ${todaySummary}
+        </div>
+
+        <div class="tk-panel">
+          <div class="tk-panel-head">
+            <h2>Split by project</h2>
+            <div class="tk-chart-controls">
+              <label class="tk-pie-toggle"><input type="checkbox" id="tk-pie-toggle" ${chartType==='pie'?'checked':''}/> Pie</label>
+              <div class="tk-tabs">
+                <div class="tk-tab ${chartPeriod==='today'?'active':''}" data-period="today">Today</div>
+                <div class="tk-tab ${chartPeriod==='week'?'active':''}" data-period="week">This week</div>
+                <div class="tk-tab ${chartPeriod==='all'?'active':''}" data-period="all">All time</div>
+              </div>
+            </div>
+          </div>
+          ${chartType==='pie' ? pieChart : barRows}
+        </div>
+
+        <div class="tk-panel">
+          <div class="tk-panel-head">
+            <h2>Log</h2>
+            <button class="tk-manual-toggle" id="tk-manual-toggle">${manualFormOpen ? 'Cancel' : '+ Add manual entry'}</button>
+          </div>
+          ${manualFormOpen ? `
+          <div class="tk-manual-form">
+            <div>
+              <label>Project</label>
+              <select class="tk-input" id="tk-manual-project">${projectOptions}</select>
+            </div>
+            <div>
+              <label>Task</label>
+              <select class="tk-input" id="tk-manual-task">${taskOptions}</select>
+            </div>
+            <div>
+              <label>Date</label>
+              <input class="tk-input" type="date" id="tk-manual-date" value="${fmtDateInput(new Date())}"/>
+            </div>
+            <div>
+              <label>Start</label>
+              <input class="tk-input" type="time" id="tk-manual-start"/>
+            </div>
+            <div>
+              <label>End</label>
+              <input class="tk-input" type="time" id="tk-manual-end"/>
+            </div>
+            <div style="grid-column:1/-1;">
+              <label>Note (optional)</label>
+              <input class="tk-input" id="tk-manual-note" placeholder="What was this?"/>
+            </div>
+            <div style="align-self:end;">
+              <button class="tk-btn tk-btn-start tk-btn-small" id="tk-manual-save" style="width:100%;">Save entry</button>
+            </div>
+          </div>` : ''}
+          <div style="margin-top: ${manualFormOpen ? '16px' : '2px'};">
+            ${logRows}
+          </div>
+        </div>
+
+        <div class="tk-panel tk-backup">
+          <div class="tk-panel-head">
+            <h2>Backup</h2>
+            <span class="tk-backup-age ${backupAge().stale?'stale':''}">${backupAge().text}</span>
+          </div>
+          <div class="tk-backup-row">
+            <button class="tk-btn tk-btn-ghost tk-btn-small" id="tk-export-btn">Export backup (JSON)</button>
+            <button class="tk-btn tk-btn-ghost tk-btn-small" id="tk-csv-btn">Export CSV (spreadsheet)</button>
+            <button class="tk-btn tk-btn-ghost tk-btn-small" id="tk-import-btn">Import backup…</button>
+            <input type="file" accept="application/json,.json" id="tk-import-file" style="display:none"/>
+          </div>
+          <div class="tk-empty" style="margin-top:8px;">Your data lives only in this browser. Export regularly so you don't lose it. JSON restores everything; CSV is for spreadsheets.</div>
+          <details class="tk-explain">
+            <summary>Where is my data saved?</summary>
+            <p>Nothing is sent anywhere. Everything is stored in this browser's
+            <strong>localStorage</strong> — a small store the browser keeps on your
+            computer — and is read back automatically each time you open the app, so
+            you don't need a backup for day-to-day use.</p>
+            <p>Because of that, the data is tied to:</p>
+            <ul>
+              <li><strong>This browser</strong> — data saved in one browser isn't visible in another. Open the app in the same browser each time.</li>
+              <li><strong>This file's location</strong> — if you move or rename the app file, or open it from a different path, the browser treats it as a new site and shows an empty list.</li>
+              <li><strong>Your browser data</strong> — clearing "cookies and site data", or using private/incognito mode, erases it.</li>
+            </ul>
+            <p>The <strong>Export</strong> buttons above are your safety net: a portable
+            copy you can re-import into any browser or after a reset.</p>
+          </details>
+        </div>
+
+        <div class="tk-footnote">Everything here stays on this computer — nothing is sent anywhere else.</div>
+      </div>
+    `;
+
+    // wire events
+    const stopBtn = document.getElementById('tk-stop-btn');
+    if (stopBtn) stopBtn.addEventListener('click', () => stopTimer());
+
+    root.querySelectorAll('[data-start-task]:not([data-stop-task])').forEach(el => {
+      const proj = el.getAttribute('data-start-project'), task = el.getAttribute('data-start-task');
+      if (proj) el.addEventListener('click', () => startTimer(proj, task));
+    });
+    root.querySelectorAll('[data-stop-task]').forEach(el => el.addEventListener('click', () => stopTimer()));
+
+    const addProjBtn = document.getElementById('tk-add-project-btn');
+    const newProjInput = document.getElementById('tk-new-project');
+    const newProjColor = document.getElementById('tk-new-project-color');
+    const newProjSwatch = document.getElementById('tk-new-project-swatch');
+    const doAddProject = () => addProject(newProjInput.value, newProjColor ? newProjColor.value : null);
+    if (addProjBtn) addProjBtn.addEventListener('click', doAddProject);
+    if (newProjInput) newProjInput.addEventListener('keydown', (ev) => { if (ev.key === 'Enter') doAddProject(); });
+    if (newProjColor && newProjSwatch) newProjColor.addEventListener('input', () => { newProjSwatch.style.background = newProjColor.value; });
+
+    root.querySelectorAll('[data-color-project]').forEach(el => {
+      el.addEventListener('input', () => { el.previousElementSibling.style.background = el.value; });
+      el.addEventListener('change', () => setProjectColor(el.getAttribute('data-color-project'), el.value));
+    });
+
+    root.querySelectorAll('[data-add-task]').forEach(btn => {
+      const pid = btn.getAttribute('data-add-task');
+      const input = root.querySelector('[data-new-task="'+pid+'"]');
+      btn.addEventListener('click', () => addTask(pid, input.value));
+      if (input) input.addEventListener('keydown', (ev) => { if (ev.key === 'Enter') addTask(pid, input.value); });
+    });
+
+    root.querySelectorAll('[data-del-project]').forEach(el => el.addEventListener('click', () => deleteProject(el.getAttribute('data-del-project'))));
+    root.querySelectorAll('[data-del-task]').forEach(el => el.addEventListener('click', () => deleteTask(el.getAttribute('data-del-task'))));
+    root.querySelectorAll('[data-rename-project]').forEach(el => el.addEventListener('click', () => renameProject(el.getAttribute('data-rename-project'))));
+    root.querySelectorAll('[data-rename-task]').forEach(el => el.addEventListener('click', () => renameTask(el.getAttribute('data-rename-task'))));
+    root.querySelectorAll('[data-move-project]').forEach(el => el.addEventListener('click', () => moveProject(el.getAttribute('data-move-project'), parseInt(el.getAttribute('data-dir'),10))));
+    root.querySelectorAll('[data-collapse]').forEach(el => el.addEventListener('click', () => toggleCollapse(el.getAttribute('data-collapse'))));
+
+    const resumeBtn = document.getElementById('tk-resume-btn');
+    if (resumeBtn && resume) resumeBtn.addEventListener('click', () => startTimer(resume.projectId, resume.taskId));
+
+    const targetInput = document.getElementById('tk-daily-target');
+    if (targetInput) targetInput.addEventListener('change', () => setDailyTarget(parseFloat(targetInput.value)));
+
+    root.querySelectorAll('[data-edit-entry]').forEach(el => el.addEventListener('click', () => { editingEntryId = el.getAttribute('data-edit-entry'); render(); }));
+    root.querySelectorAll('[data-cancel-entry]').forEach(el => el.addEventListener('click', () => { editingEntryId = null; render(); }));
+    root.querySelectorAll('[data-save-entry]').forEach(el => el.addEventListener('click', () => {
+      const id = el.getAttribute('data-save-entry');
+      const row = root.querySelector('[data-edit-row="'+id+'"]');
+      const get = k => row.querySelector('[data-ef="'+k+'"]').value;
+      updateEntry(id, get('date'), get('start'), get('end'), get('note'));
+    }));
+
+    root.querySelectorAll('[data-period]').forEach(el => {
+      el.addEventListener('click', () => { chartPeriod = el.getAttribute('data-period'); render(); });
+    });
+    const pieToggle = document.getElementById('tk-pie-toggle');
+    if (pieToggle) pieToggle.addEventListener('change', () => { chartType = pieToggle.checked ? 'pie' : 'bar'; render(); });
+
+    root.querySelectorAll('[data-del-entry]').forEach(el => {
+      el.addEventListener('click', () => deleteEntry(el.getAttribute('data-del-entry')));
+    });
+
+    const manualToggle = document.getElementById('tk-manual-toggle');
+    if (manualToggle) manualToggle.addEventListener('click', () => { manualFormOpen = !manualFormOpen; render(); });
+    const manualProjSel = document.getElementById('tk-manual-project');
+    if (manualProjSel) manualProjSel.addEventListener('change', () => { manualProjId(manualProjSel.value); });
+    const manualSave = document.getElementById('tk-manual-save');
+    if (manualSave) manualSave.addEventListener('click', () => {
+      addManualEntry(
+        document.getElementById('tk-manual-project').value,
+        document.getElementById('tk-manual-task').value,
+        document.getElementById('tk-manual-date').value,
+        document.getElementById('tk-manual-start').value,
+        document.getElementById('tk-manual-end').value,
+        document.getElementById('tk-manual-note').value
+      );
+    });
+
+    const exportBtn = document.getElementById('tk-export-btn');
+    if (exportBtn) exportBtn.addEventListener('click', exportData);
+    const csvBtn = document.getElementById('tk-csv-btn');
+    if (csvBtn) csvBtn.addEventListener('click', exportCSV);
+    const importBtn = document.getElementById('tk-import-btn');
+    const importFile = document.getElementById('tk-import-file');
+    if (importBtn && importFile){
+      importBtn.addEventListener('click', () => importFile.click());
+      importFile.addEventListener('change', () => { if (importFile.files[0]) importData(importFile.files[0]); });
+    }
+  }
+
+  function manualProjId(id){ manualProjectId = id; render(); }
+
+  function escapeHtml(s){
+    return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  }
+
+  loadAll();
+})();
+</script>
+</div>
