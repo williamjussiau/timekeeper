@@ -13,12 +13,25 @@
     --font-display: ui-monospace, "SF Mono", "Cascadia Mono", Consolas, monospace;
     --font-body: -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, sans-serif;
 
+    color-scheme: light;
     background: var(--bg);
     color: var(--ink);
     font-family: var(--font-body);
     min-height: 100vh;
     box-sizing: border-box;
     padding: 28px 18px 60px;
+  }
+  #app-root[data-theme="dark"] {
+    --bg: #16191D;
+    --panel: #1E2429;
+    --ink: #E6EAEE;
+    --ink-soft: #99A4AE;
+    --ink-faint: #6B757E;
+    --accent: #D8A24E;
+    --accent-dim: #3A3121;
+    --line: #2C333A;
+    --danger: #D46A50;
+    color-scheme: dark;
   }
   #app-root *, #app-root *::before, #app-root *::after { box-sizing: border-box; }
 
@@ -30,7 +43,13 @@
   }
   .tk-word { font-size: 20px; font-weight: 700; letter-spacing: 0.02em; }
   .tk-word span { color: var(--accent); }
+  .tk-header-right { display: flex; align-items: center; gap: 12px; }
   .tk-date { font-family: var(--font-display); font-size: 12px; color: var(--ink-soft); }
+  .tk-theme-btn {
+    background: transparent; border: 1px solid var(--line); color: var(--ink-soft);
+    border-radius: 7px; width: 30px; height: 26px; cursor: pointer; font-size: 14px; line-height: 1;
+  }
+  .tk-theme-btn:hover { color: var(--ink); border-color: var(--ink-faint); }
 
   .tk-panel {
     background: var(--panel); border: 1px solid var(--line); border-radius: 10px;
@@ -224,6 +243,7 @@
   let dailyTargetHours = 0;    // 0 = no target set
   let lastTask = null;         // {projectId, taskId} last tracked, for "resume"
   let lastBackup = null;       // ISO timestamp of last export
+  let theme = 'light';         // 'light' | 'dark'
 
   const root = document.getElementById('app-root');
 
@@ -246,12 +266,32 @@
     dailyTargetHours = storageGet('tk-daily-target') || 0;
     lastTask = storageGet('tk-last-task') || null;
     lastBackup = storageGet('tk-last-backup') || null;
+    theme = storageGet('tk-theme') || (prefersDark() ? 'dark' : 'light');
+    applyTheme();
     migrateToTasks();
     guardStaleTimer();
     render();
     updateTitle();
     if (activeTimer) startTicking();
     document.addEventListener('keydown', onKeydown);
+    if (typeof window !== 'undefined') window.addEventListener('beforeunload', onBeforeUnload);
+  }
+
+  function prefersDark(){
+    return typeof window !== 'undefined' && window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
+  }
+  function applyTheme(){ if (root) root.setAttribute('data-theme', theme); }
+  function toggleTheme(){
+    theme = theme === 'dark' ? 'light' : 'dark';
+    storageSet('tk-theme', theme);
+    applyTheme();
+    render();
+  }
+
+  // Data is already saved on every change, but warn before leaving while a
+  // timer is still running so it isn't left tracking by accident.
+  function onBeforeUnload(ev){
+    if (activeTimer){ ev.preventDefault(); ev.returnValue = ''; return ''; }
   }
 
   // If a timer has been left running for a very long time (>= 8h) or across a
@@ -800,7 +840,10 @@
       <div class="tk-wrap">
         <div class="tk-header">
           <div class="tk-word">Time<span>keeper</span></div>
-          <div class="tk-date">${dateStr}</div>
+          <div class="tk-header-right">
+            <div class="tk-date">${dateStr}</div>
+            <button class="tk-theme-btn" id="tk-theme-btn" title="${theme==='dark'?'Switch to light mode':'Switch to dark mode'}">${theme==='dark'?'☀':'☾'}</button>
+          </div>
         </div>
 
         <div class="tk-panel">
@@ -951,6 +994,9 @@
     // wire events
     const stopBtn = document.getElementById('tk-stop-btn');
     if (stopBtn) stopBtn.addEventListener('click', () => stopTimer());
+
+    const themeBtn = document.getElementById('tk-theme-btn');
+    if (themeBtn) themeBtn.addEventListener('click', toggleTheme);
 
     root.querySelectorAll('[data-start-task]:not([data-stop-task])').forEach(el => {
       const proj = el.getAttribute('data-start-project'), task = el.getAttribute('data-start-task');
