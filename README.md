@@ -10,6 +10,7 @@ no cloud, no dependencies. It's a single HTML file.
 - One-click start/stop per task (only one runs at a time), live tab-title timer,
   Esc to stop, resume-last
 - Today / this-week totals, optional daily target, and a "forgot to stop" guard
+- A day timeline showing when you worked on each project
 - Split-by-project chart as bars or a pie
 - Editable log with notes and manual entries
 - JSON / CSV export and JSON import; data stored in the browser's `localStorage`

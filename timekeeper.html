@@ -152,6 +152,19 @@
   .tk-legend-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 5px 0; border-bottom: 1px solid var(--line); font-size: 13px; }
   .tk-legend-row:last-child { border-bottom: none; }
 
+  /* --- today's timeline --- */
+  .tk-tl { font-size: 12px; }
+  .tk-tl-row { display: grid; grid-template-columns: 140px 1fr; align-items: center; gap: 10px; margin-bottom: 6px; }
+  .tk-tl-label { display: flex; align-items: center; gap: 6px; min-width: 0; }
+  .tk-tl-name { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .tk-tl-total { margin-left: auto; padding-left: 6px; font-family: var(--font-display); font-size: 11px; color: var(--ink-soft); flex-shrink: 0; }
+  .tk-tl-track { position: relative; height: 20px; background: var(--bg); border-radius: 4px; }
+  .tk-tl-block { position: absolute; top: 3px; height: 14px; border-radius: 3px; min-width: 2px; }
+  .tk-tl-now { position: absolute; top: 0; bottom: 0; width: 2px; background: var(--danger); opacity: 0.7; }
+  .tk-tl-axis { margin-top: 2px; }
+  .tk-tl-axis .tk-tl-track { height: 14px; background: none; overflow: visible; }
+  .tk-tl-tick { position: absolute; top: 0; transform: translateX(-50%); color: var(--ink-faint); font-family: var(--font-display); font-size: 10px; white-space: nowrap; }
+
   /* --- backup --- */
   .tk-backup-row { display: flex; gap: 8px; flex-wrap: wrap; }
   .tk-backup-age { font-size: 11px; color: var(--ink-soft); font-family: var(--font-display); }
@@ -639,6 +652,64 @@
     }).join('');
     const todaySummary = todayGroups || `<div class="tk-empty">Nothing tracked today yet.</div>`;
 
+    // --- Today's timeline (a lane per project across the hours of the day) ---
+    const HOUR = 3600000;
+    const dayStartMs = todayFrom.getTime();
+    const nowMs = Date.now();
+    const segsByProject = {}; // projectId -> [{s, e, taskId}] (clamped to today)
+    let minMs = Infinity, maxMs = -Infinity;
+    function addSeg(projectId, taskId, startMs, endMs){
+      const s = Math.max(startMs, dayStartMs);
+      if (endMs <= s) return;
+      (segsByProject[projectId] = segsByProject[projectId] || []).push({ s, e: endMs, taskId });
+      if (s < minMs) minMs = s;
+      if (endMs > maxMs) maxMs = endMs;
+    }
+    entries.forEach(en => {
+      const endMs = new Date(en.end).getTime();
+      if (endMs >= dayStartMs) addSeg(en.projectId, en.taskId, new Date(en.start).getTime(), endMs);
+    });
+    if (activeTimer) addSeg(activeTimer.projectId, activeTimer.taskId, new Date(activeTimer.start).getTime(), nowMs);
+
+    let timeline;
+    if (maxMs < 0){
+      timeline = `<div class="tk-empty">Nothing tracked today yet.</div>`;
+    } else {
+      const rangeStart = Math.floor(minMs / HOUR) * HOUR;
+      let rangeEnd = Math.ceil(maxMs / HOUR) * HOUR;
+      if (rangeEnd <= rangeStart) rangeEnd = rangeStart + HOUR;
+      const span = rangeEnd - rangeStart;
+      const pct = ms => ((ms - rangeStart) / span) * 100;
+      const hhmm = ms => new Date(ms).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+
+      let ticks = '';
+      for (let t = rangeStart; t <= rangeEnd; t += HOUR){
+        ticks += `<div class="tk-tl-tick" style="left:${pct(t)}%"><span>${hhmm(t)}</span></div>`;
+      }
+      const nowMarker = (nowMs >= rangeStart && nowMs <= rangeEnd)
+        ? `<div class="tk-tl-now" style="left:${pct(nowMs)}%" title="now"></div>` : '';
+
+      const lanes = projects.filter(p => segsByProject[p.id]).map(p => {
+        const segs = segsByProject[p.id];
+        const total = segs.reduce((s, seg) => s + (seg.e - seg.s) / 1000, 0);
+        const blocks = segs.map(seg => {
+          const t = tasks.find(tk => tk.id === seg.taskId);
+          const tip = (t ? t.name : '(task)') + ' · ' + hhmm(seg.s) + '–' + hhmm(seg.e) + ' (' + fmtHM((seg.e - seg.s) / 1000) + ')';
+          const w = Math.max(pct(seg.e) - pct(seg.s), 0.5);
+          return `<div class="tk-tl-block" style="left:${pct(seg.s)}%;width:${w}%;background:${p.color}" title="${escapeHtml(tip)}"></div>`;
+        }).join('');
+        return `<div class="tk-tl-row">
+          <div class="tk-tl-label"><span class="tk-dot" style="background:${p.color}"></span><span class="tk-tl-name">${escapeHtml(p.name)}</span><span class="tk-tl-total">${fmtHM(total)}</span></div>
+          <div class="tk-tl-track">${blocks}${nowMarker}</div>
+        </div>`;
+      }).join('');
+
+      timeline = `<div class="tk-tl">
+        ${lanes}
+        <div class="tk-tl-row tk-tl-axis"><div class="tk-tl-label"></div><div class="tk-tl-track">${ticks}</div></div>
+      </div>`;
+    }
+
     // --- Split-by-project bar chart ---
     const chartEntries = entriesForPeriod(chartPeriod);
     const totalsByProject = {};
@@ -782,6 +853,11 @@
             <span class="tk-bar-val">${Math.round(targetPct)}%</span>` : `<span class="tk-empty">Set a target to see daily progress.</span>`}
           </div>
           ${todaySummary}
+        </div>
+
+        <div class="tk-panel">
+          <h2>Today's timeline</h2>
+          ${timeline}
         </div>
 
         <div class="tk-panel">
