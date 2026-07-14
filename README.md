@@ -9,10 +9,12 @@ no cloud, no dependencies.
 - Projects with tasks, each with its own colour
 - Start and stop tasks with one click (only one runs at a time)
 - Live timer in the tab title. Press Esc to stop, or resume the last task
-- Today and this-week totals with optional daily target
+- Today, this-week and this-month totals with optional daily target
 - A guard against forgetting to stop the timer
-- A day timeline showing your work sessions per project
-- Split-by-project chart (bars or pie)
+- A day timeline (tasks shown as shades of the project colour) and a multi-day
+  "Recent days" view to compare days at a glance
+- Split-by-project chart (bars or pie), filterable by today/week/month/all
+- Light and dark mode
 - Editable log for notes and manual time entries
 - Export to JSON or CSV, and import from JSON. Data is stored in your browser
 

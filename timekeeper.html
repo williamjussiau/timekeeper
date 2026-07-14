@@ -160,6 +160,8 @@
   .tk-sum-group:last-child { margin-bottom: 0; }
   .tk-sum-head { display: flex; align-items: center; justify-content: space-between; font-weight: 600; font-size: 13px; padding-bottom: 4px; border-bottom: 1px solid var(--line); margin-bottom: 4px; }
   .tk-sum-task { display: flex; align-items: center; justify-content: space-between; font-size: 13px; padding: 3px 0 3px 17px; color: var(--ink-soft); }
+  .tk-sum-taskname { display: flex; align-items: center; gap: 7px; min-width: 0; }
+  .tk-dot-sm { width: 8px; height: 8px; }
 
   /* --- pie / donut chart --- */
   .tk-chart-controls { display: flex; align-items: center; gap: 12px; }
@@ -229,12 +231,47 @@
 <script>
 (function(){
   const PALETTE = ['#C08A3E','#4A7C82','#8B5FBF','#6B8E4E','#B5533C','#3D6E8C','#A67C52','#5C6B73'];
+
+  // --- colour helpers (for shading tasks within a project's colour) ---
+  function hexToHsl(hex){
+    let m = String(hex).replace('#','');
+    if (m.length === 3) m = m[0]+m[0]+m[1]+m[1]+m[2]+m[2];
+    const r = parseInt(m.slice(0,2),16)/255, g = parseInt(m.slice(2,4),16)/255, b = parseInt(m.slice(4,6),16)/255;
+    const max = Math.max(r,g,b), min = Math.min(r,g,b), d = max-min;
+    let h = 0; const l = (max+min)/2; const s = d === 0 ? 0 : d/(1-Math.abs(2*l-1));
+    if (d !== 0){
+      if (max === r) h = ((g-b)/d) % 6;
+      else if (max === g) h = (b-r)/d + 2;
+      else h = (r-g)/d + 4;
+      h *= 60; if (h < 0) h += 360;
+    }
+    return [h, s*100, l*100];
+  }
+  function hslToHex(h, s, l){
+    s/=100; l/=100;
+    const c = (1-Math.abs(2*l-1))*s, x = c*(1-Math.abs((h/60)%2-1)), m = l-c/2;
+    let r=0,g=0,b=0;
+    if (h<60){r=c;g=x;} else if (h<120){r=x;g=c;} else if (h<180){g=c;b=x;}
+    else if (h<240){g=x;b=c;} else if (h<300){r=x;b=c;} else {r=c;b=x;}
+    const to = v => Math.round((v+m)*255).toString(16).padStart(2,'0');
+    return '#'+to(r)+to(g)+to(b);
+  }
+  // spread tasks across a lightness band around the project's colour; stays
+  // legible in both light and dark themes. One task keeps the base colour.
+  function taskShade(baseHex, idx, count){
+    if (count <= 1) return baseHex;
+    const [h, s, l] = hexToHsl(baseHex);
+    const spread = 34; // total lightness points across all tasks
+    const nl = Math.max(24, Math.min(82, (l - spread/2) + idx * (spread/(count-1))));
+    return hslToHex(h, s, nl);
+  }
   let projects = [];   // {id, name, color}
   let tasks = [];      // {id, projectId, name}
   let entries = [];    // {id, projectId, taskId, start, end, note}
   let activeTimer = null; // {projectId, taskId, start}
   let chartPeriod = 'today';
   let chartType = 'bar'; // 'bar' | 'pie'
+  let daysRange = 14; // multi-day timeline span (7 | 14 | 30)
   let manualFormOpen = false;
   let manualProjectId = null; // which project is selected in the manual-entry form
   let tickHandle = null;
@@ -377,6 +414,7 @@
     dt.setHours(0,0,0,0); dt.setDate(dt.getDate()-day); return dt;
   }
   function startOfDay(d){ const dt = new Date(d); dt.setHours(0,0,0,0); return dt; }
+  function startOfMonth(d){ const dt = new Date(d); dt.setHours(0,0,0,0); dt.setDate(1); return dt; }
   function fmtDateInput(d){ return d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0'); }
   function fmtTimeInput(d){ return String(d.getHours()).padStart(2,'0') + ':' + String(d.getMinutes()).padStart(2,'0'); }
 
@@ -389,6 +427,7 @@
     let from = null;
     if (period === 'today') from = startOfDay(now);
     else if (period === 'week') from = startOfWeek(now);
+    else if (period === 'month') from = startOfMonth(now);
     return entries.filter(e => !from || new Date(e.end) >= from);
   }
 
@@ -615,16 +654,19 @@
     // today's tracked seconds per task (incl. the live timer)
     const todayFrom = startOfDay(new Date());
     const weekFrom = startOfWeek(new Date());
+    const monthFrom = startOfMonth(new Date());
     const todaySecByTask = {};
-    let weekTotalSec = 0;
+    let weekTotalSec = 0, monthTotalSec = 0;
     entries.forEach(e => {
       if (new Date(e.end) >= todayFrom) todaySecByTask[e.taskId] = (todaySecByTask[e.taskId]||0) + durationOf(e);
       if (new Date(e.end) >= weekFrom) weekTotalSec += durationOf(e);
+      if (new Date(e.end) >= monthFrom) monthTotalSec += durationOf(e);
     });
     if (activeTimer){
       const live = (Date.now() - new Date(activeTimer.start))/1000;
       todaySecByTask[activeTimer.taskId] = (todaySecByTask[activeTimer.taskId]||0) + live;
       weekTotalSec += live;
+      monthTotalSec += live;
     }
     const todayTotalSec = Object.values(todaySecByTask).reduce((s,v) => s + v, 0);
     const targetSec = dailyTargetHours * 3600;
@@ -633,6 +675,13 @@
     // resume target: the last task tracked, if it still exists
     const resume = (!activeTimer && lastTask && projects.some(p => p.id === lastTask.projectId) && tasks.some(t => t.id === lastTask.taskId)) ? lastTask : null;
     const resumeName = resume ? (tasks.find(t => t.id === resume.taskId) || {}).name : '';
+
+    // per-task colour: a stable shade of the parent project's colour
+    const taskShadeById = {};
+    projects.forEach(p => {
+      const pts = tasks.filter(t => t.projectId === p.id);
+      pts.forEach((t, i) => { taskShadeById[t.id] = taskShade(p.color, i, pts.length); });
+    });
 
     // --- Projects & tasks list ---
     const projectCards = projects.length ? projects.map((p, idx) => {
@@ -682,7 +731,7 @@
     const todayGroups = projects.map(p => {
       const rows = tasks.filter(t => t.projectId === p.id && todaySecByTask[t.id])
         .sort((a,b) => todaySecByTask[b.id]-todaySecByTask[a.id])
-        .map(t => `<div class="tk-sum-task"><span>${escapeHtml(t.name)}</span><span class="tk-log-dur">${fmtHM(todaySecByTask[t.id])}</span></div>`).join('');
+        .map(t => `<div class="tk-sum-task"><span class="tk-sum-taskname"><span class="tk-dot tk-dot-sm" style="background:${taskShadeById[t.id] || p.color}"></span>${escapeHtml(t.name)}</span><span class="tk-log-dur">${fmtHM(todaySecByTask[t.id])}</span></div>`).join('');
       if (!rows) return '';
       const total = tasks.filter(t => t.projectId === p.id).reduce((s,t) => s + (todaySecByTask[t.id]||0), 0);
       return `<div class="tk-sum-group">
@@ -736,7 +785,7 @@
           const t = tasks.find(tk => tk.id === seg.taskId);
           const tip = (t ? t.name : '(task)') + ' · ' + hhmm(seg.s) + '–' + hhmm(seg.e) + ' (' + fmtHM((seg.e - seg.s) / 1000) + ')';
           const w = Math.max(pct(seg.e) - pct(seg.s), 0.5);
-          return `<div class="tk-tl-block" style="left:${pct(seg.s)}%;width:${w}%;background:${p.color}" title="${escapeHtml(tip)}"></div>`;
+          return `<div class="tk-tl-block" style="left:${pct(seg.s)}%;width:${w}%;background:${taskShadeById[seg.taskId] || p.color}" title="${escapeHtml(tip)}"></div>`;
         }).join('');
         return `<div class="tk-tl-row">
           <div class="tk-tl-label"><span class="tk-dot" style="background:${p.color}"></span><span class="tk-tl-name">${escapeHtml(p.name)}</span><span class="tk-tl-total">${fmtHM(total)}</span></div>
@@ -747,6 +796,76 @@
       timeline = `<div class="tk-tl">
         ${lanes}
         <div class="tk-tl-row tk-tl-axis"><div class="tk-tl-label"></div><div class="tk-tl-track">${ticks}</div></div>
+      </div>`;
+    }
+
+    // --- Recent days (multi-day timeline: one row per day, coloured by project) ---
+    // Collect segments per day (local-day key), clamped to that day's midnight
+    // bounds so an entry crossing midnight is split across two day rows.
+    const MIN = 60000;
+    const segsByDay = {}; // dayStartMs -> [{startMin, endMin, projectId, taskId}]
+    let dMin = Infinity, dMax = -Infinity;
+    function addDaySeg(startMs, endMs, projectId, taskId){
+      let s = startMs;
+      while (s < endMs){
+        const dayStart = startOfDay(new Date(s)).getTime();
+        const dayEnd = dayStart + 86400000;
+        const segEnd = Math.min(endMs, dayEnd);
+        const startMin = (s - dayStart) / MIN;
+        const endMin = (segEnd - dayStart) / MIN;
+        (segsByDay[dayStart] = segsByDay[dayStart] || []).push({ startMin, endMin, projectId, taskId });
+        if (startMin < dMin) dMin = startMin;
+        if (endMin > dMax) dMax = endMin;
+        s = segEnd;
+      }
+    }
+    const rangeFromMs = startOfDay(new Date(Date.now() - (daysRange - 1) * 86400000)).getTime();
+    entries.forEach(en => {
+      const startMs = new Date(en.start).getTime(), endMs = new Date(en.end).getTime();
+      if (endMs > rangeFromMs && endMs > startMs) addDaySeg(Math.max(startMs, rangeFromMs), endMs, en.projectId, en.taskId);
+    });
+    if (activeTimer){
+      const startMs = new Date(activeTimer.start).getTime();
+      if (Date.now() > rangeFromMs) addDaySeg(Math.max(startMs, rangeFromMs), Date.now(), activeTimer.projectId, activeTimer.taskId);
+    }
+
+    let multiDay;
+    const dayKeys = Object.keys(segsByDay).map(Number).sort((a,b) => b - a); // most recent first
+    if (!dayKeys.length){
+      multiDay = `<div class="tk-empty">No time tracked in the last ${daysRange} days.</div>`;
+    } else {
+      const rmStart = Math.floor(dMin / 60) * 60;      // whole-hour bounds (minutes)
+      let rmEnd = Math.ceil(dMax / 60) * 60;
+      if (rmEnd <= rmStart) rmEnd = rmStart + 60;
+      const mspan = rmEnd - rmStart;
+      const mpct = min => ((min - rmStart) / mspan) * 100;
+      const hLabel = min => String(Math.floor(min / 60)).padStart(2,'0') + ':' + String(Math.round(min % 60)).padStart(2,'0');
+
+      let mticks = '';
+      for (let m = rmStart; m <= rmEnd; m += 60){
+        mticks += `<div class="tk-tl-tick" style="left:${mpct(m)}%"><span>${hLabel(m)}</span></div>`;
+      }
+
+      const dayRows = dayKeys.map(dk => {
+        const segs = segsByDay[dk];
+        const totalSec = segs.reduce((s, seg) => s + (seg.endMin - seg.startMin) * 60, 0);
+        const label = new Date(dk).toLocaleDateString(undefined, { weekday: 'short', day: 'numeric' });
+        const blocks = segs.map(seg => {
+          const p = projects.find(pr => pr.id === seg.projectId);
+          const t = tasks.find(tk => tk.id === seg.taskId);
+          const tip = (p ? p.name : '(project)') + ' · ' + (t ? t.name : '(task)') + ' · ' + hLabel(seg.startMin) + '–' + hLabel(seg.endMin) + ' (' + fmtHM((seg.endMin - seg.startMin) * 60) + ')';
+          const w = Math.max(mpct(seg.endMin) - mpct(seg.startMin), 0.4);
+          return `<div class="tk-tl-block" style="left:${mpct(seg.startMin)}%;width:${w}%;background:${p ? p.color : '#888'}" title="${escapeHtml(tip)}"></div>`;
+        }).join('');
+        return `<div class="tk-tl-row">
+          <div class="tk-tl-label"><span class="tk-tl-name">${escapeHtml(label)}</span><span class="tk-tl-total">${fmtHM(totalSec)}</span></div>
+          <div class="tk-tl-track">${blocks}</div>
+        </div>`;
+      }).join('');
+
+      multiDay = `<div class="tk-tl">
+        ${dayRows}
+        <div class="tk-tl-row tk-tl-axis"><div class="tk-tl-label"></div><div class="tk-tl-track">${mticks}</div></div>
       </div>`;
     }
 
@@ -886,7 +1005,7 @@
         <div class="tk-panel">
           <div class="tk-panel-head">
             <h2>Today</h2>
-            <div class="tk-day-stats">Today <b>${fmtHM(todayTotalSec)}</b> · This week <b>${fmtHM(weekTotalSec)}</b></div>
+            <div class="tk-day-stats">Today <b>${fmtHM(todayTotalSec)}</b> · This week <b>${fmtHM(weekTotalSec)}</b> · This month <b>${fmtHM(monthTotalSec)}</b></div>
           </div>
           <div class="tk-target-row">
             <label class="tk-target-label">Daily target (h)
@@ -905,12 +1024,25 @@
 
         <div class="tk-panel">
           <div class="tk-panel-head">
+            <h2>Recent days</h2>
+            <div class="tk-tabs">
+              <div class="tk-tab ${daysRange===7?'active':''}" data-days="7">7 days</div>
+              <div class="tk-tab ${daysRange===14?'active':''}" data-days="14">14 days</div>
+              <div class="tk-tab ${daysRange===30?'active':''}" data-days="30">30 days</div>
+            </div>
+          </div>
+          ${multiDay}
+        </div>
+
+        <div class="tk-panel">
+          <div class="tk-panel-head">
             <h2>Split by project</h2>
             <div class="tk-chart-controls">
               <label class="tk-pie-toggle"><input type="checkbox" id="tk-pie-toggle" ${chartType==='pie'?'checked':''}/> Pie</label>
               <div class="tk-tabs">
                 <div class="tk-tab ${chartPeriod==='today'?'active':''}" data-period="today">Today</div>
                 <div class="tk-tab ${chartPeriod==='week'?'active':''}" data-period="week">This week</div>
+                <div class="tk-tab ${chartPeriod==='month'?'active':''}" data-period="month">This month</div>
                 <div class="tk-tab ${chartPeriod==='all'?'active':''}" data-period="all">All time</div>
               </div>
             </div>
@@ -1049,6 +1181,9 @@
 
     root.querySelectorAll('[data-period]').forEach(el => {
       el.addEventListener('click', () => { chartPeriod = el.getAttribute('data-period'); render(); });
+    });
+    root.querySelectorAll('[data-days]').forEach(el => {
+      el.addEventListener('click', () => { daysRange = parseInt(el.getAttribute('data-days'),10); render(); });
     });
     const pieToggle = document.getElementById('tk-pie-toggle');
     if (pieToggle) pieToggle.addEventListener('change', () => { chartType = pieToggle.checked ? 'pie' : 'bar'; render(); });
