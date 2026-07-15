@@ -4,6 +4,8 @@ A local-only time tracker. Track time against projects and their tasks,
 see where your hours go, and keep everything on your own machine. No accounts,
 no cloud, no dependencies.
 
+![Timekeeper](docs/screenshot.png)
+
 ## Features
 
 - Projects with tasks, each with its own colour
