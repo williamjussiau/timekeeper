@@ -15,7 +15,9 @@ no cloud, no dependencies.
 - A guard against forgetting to stop the timer
 - A day timeline (tasks shown as shades of the project colour) and a multi-day
   "Recent days" view to compare days at a glance
-- Split-by-project chart (bars or pie), filterable by today/week/month/all
+- A month calendar with each day coloured by the projects worked
+- Split-by-project chart (bars or pie, with percentages), filterable by
+  today/week/month/all
 - Light and dark mode
 - Editable log for notes and manual time entries
 - Export to JSON or CSV, and import from JSON. Data is stored in your browser

@@ -119,7 +119,7 @@
   .tk-panel-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px; }
   .tk-panel-head h2 { margin: 0; }
 
-  .tk-bar-row { display: grid; grid-template-columns: 120px 1fr 64px; align-items: center; gap: 10px; margin-bottom: 10px; }
+  .tk-bar-row { display: grid; grid-template-columns: 120px 1fr 96px; align-items: center; gap: 10px; margin-bottom: 10px; }
   .tk-bar-label { font-size: 13px; display: flex; align-items: center; gap: 7px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .tk-bar-track { background: var(--bg); border-radius: 4px; height: 10px; overflow: hidden; }
   .tk-bar-fill { height: 100%; border-radius: 4px; transition: width 0.4s ease; }
@@ -186,6 +186,23 @@
   .tk-tl-axis .tk-tl-track { height: 14px; background: none; overflow: visible; }
   .tk-tl-tick { position: absolute; top: 0; transform: translateX(-50%); color: var(--ink-faint); font-family: var(--font-display); font-size: 10px; white-space: nowrap; }
 
+  /* --- month calendar --- */
+  .tk-cal-nav { display: flex; align-items: center; gap: 8px; }
+  .tk-cal-label { font-size: 13px; font-weight: 600; min-width: 130px; text-align: center; }
+  .tk-cal-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 5px; }
+  .tk-cal-wd { font-size: 10px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--ink-faint); text-align: center; padding-bottom: 2px; }
+  .tk-cal-cell { min-height: 50px; border: 1px solid var(--line); border-radius: 6px; padding: 4px 5px; background: var(--bg); display: flex; flex-direction: column; }
+  .tk-cal-cell.out { opacity: 0.4; }
+  .tk-cal-cell.today { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); }
+  .tk-cal-top { display: flex; align-items: baseline; justify-content: space-between; gap: 4px; }
+  .tk-cal-num { font-size: 11px; color: var(--ink-soft); font-family: var(--font-display); }
+  .tk-cal-hrs { font-size: 9px; color: var(--ink-faint); font-family: var(--font-display); }
+  .tk-cal-bar { margin-top: auto; display: flex; height: 6px; border-radius: 3px; overflow: hidden; }
+  .tk-cal-bar span { display: block; min-width: 1px; }
+  .tk-cal-legend { display: flex; flex-wrap: wrap; gap: 6px 14px; margin-top: 12px; }
+  .tk-cal-leg { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--ink-soft); }
+  .tk-count { font-size: 11px; font-weight: 600; color: var(--ink-faint); font-family: var(--font-display); }
+
   /* --- backup --- */
   .tk-backup-row { display: flex; gap: 8px; flex-wrap: wrap; }
   .tk-backup-age { font-size: 11px; color: var(--ink-soft); font-family: var(--font-display); }
@@ -221,7 +238,7 @@
 
   @media (max-width: 600px) {
     .tk-manual-form { grid-template-columns: 1fr 1fr; }
-    .tk-bar-row { grid-template-columns: 90px 1fr 54px; }
+    .tk-bar-row { grid-template-columns: 80px 1fr 84px; }
   }
   @media (prefers-reduced-motion: reduce) {
     .tk-dial-progress, .tk-bar-fill { transition: none; }
@@ -272,6 +289,8 @@
   let chartPeriod = 'today';
   let chartType = 'bar'; // 'bar' | 'pie'
   let daysRange = 14; // multi-day timeline span (7 | 14 | 30)
+  let calMonthOffset = 0; // 0 = current month, -1 = previous, …
+  let logCollapsed = true; // Log panel folded by default (it gets long)
   let manualFormOpen = false;
   let manualProjectId = null; // which project is selected in the manual-entry form
   let tickHandle = null;
@@ -300,6 +319,7 @@
     entries = storageGet('tk-entries') || [];
     activeTimer = storageGet('tk-active-timer') || null;
     collapsed = storageGet('tk-collapsed') || {};
+    { const lc = storageGet('tk-log-collapsed'); logCollapsed = (lc === null ? true : lc); }
     dailyTargetHours = storageGet('tk-daily-target') || 0;
     lastTask = storageGet('tk-last-task') || null;
     lastBackup = storageGet('tk-last-backup') || null;
@@ -528,6 +548,11 @@
     collapsed[id] = !collapsed[id];
     storageSet('tk-collapsed', collapsed); render();
   }
+  function toggleLog(){
+    logCollapsed = !logCollapsed;
+    storageSet('tk-log-collapsed', logCollapsed); render();
+  }
+  function shiftMonth(delta){ calMonthOffset += delta; render(); }
   function setDailyTarget(hours){
     dailyTargetHours = (hours && hours > 0) ? hours : 0;
     storageSet('tk-daily-target', dailyTargetHours); render();
@@ -869,6 +894,56 @@
       </div>`;
     }
 
+    // --- Month calendar (each day coloured by the projects worked that day) ---
+    const calBase = startOfMonth(new Date());
+    calBase.setMonth(calBase.getMonth() + calMonthOffset);
+    const calYear = calBase.getFullYear(), calMon = calBase.getMonth();
+    const calLabel = calBase.toLocaleDateString(undefined, { month: 'long', year: 'numeric' });
+    // seconds per project per local day-key within the shown month
+    const monthSecByDayProject = {}; // 'YYYY-M-D' -> { projectId: sec }
+    function calAdd(dayKey, projectId, sec){
+      (monthSecByDayProject[dayKey] = monthSecByDayProject[dayKey] || {});
+      monthSecByDayProject[dayKey][projectId] = (monthSecByDayProject[dayKey][projectId] || 0) + sec;
+    }
+    function dayKeyOf(d){ return d.getFullYear() + '-' + d.getMonth() + '-' + d.getDate(); }
+    entries.forEach(e => {
+      const d = new Date(e.start);
+      if (d.getFullYear() === calYear && d.getMonth() === calMon) calAdd(dayKeyOf(d), e.projectId, durationOf(e));
+    });
+    if (activeTimer){
+      const d = new Date(activeTimer.start);
+      if (d.getFullYear() === calYear && d.getMonth() === calMon) calAdd(dayKeyOf(d), activeTimer.projectId, (Date.now() - d) / 1000);
+    }
+    const projName = id => { const p = projects.find(pr => pr.id === id); return p ? p.name : '(deleted)'; };
+    const projColor = id => { const p = projects.find(pr => pr.id === id); return p ? p.color : '#888'; };
+    // grid runs Monday..Sunday, from the Monday on/before the 1st to fill full weeks
+    const first = new Date(calYear, calMon, 1);
+    const gridStart = new Date(first); gridStart.setDate(1 - ((first.getDay() + 6) % 7));
+    const todayKey = dayKeyOf(new Date());
+    const weekdayHead = ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'].map(w => `<div class="tk-cal-wd">${w}</div>`).join('');
+    let calCells = '';
+    for (let i = 0; i < 42; i++){
+      const d = new Date(gridStart); d.setDate(gridStart.getDate() + i);
+      const inMonth = d.getMonth() === calMon;
+      const key = dayKeyOf(d);
+      const byProj = monthSecByDayProject[key];
+      let bar = '', total = 0, tip = '';
+      if (byProj){
+        const parts = Object.entries(byProj).sort((a,b) => b[1]-a[1]);
+        total = parts.reduce((s, [,v]) => s + v, 0);
+        bar = parts.map(([pid, sec]) => `<span style="flex:${sec};background:${projColor(pid)}"></span>`).join('');
+        tip = parts.map(([pid, sec]) => projName(pid) + ' ' + fmtHM(sec)).join(' · ');
+      }
+      calCells += `<div class="tk-cal-cell${inMonth?'':' out'}${key===todayKey?' today':''}"${tip?` title="${escapeHtml(tip)}"`:''}>
+        <div class="tk-cal-top"><span class="tk-cal-num">${d.getDate()}</span>${byProj ? `<span class="tk-cal-hrs">${fmtHM(total)}</span>` : ''}</div>
+        ${byProj ? `<span class="tk-cal-bar">${bar}</span>` : ''}
+      </div>`;
+    }
+    const calLegend = projects.filter(p => Object.values(monthSecByDayProject).some(bp => bp[p.id]))
+      .map(p => `<span class="tk-cal-leg"><span class="tk-dot tk-dot-sm" style="background:${p.color}"></span>${escapeHtml(p.name)}</span>`).join('');
+    const calendar = `<div class="tk-cal-grid">${weekdayHead}${calCells}</div>` +
+      (calLegend ? `<div class="tk-cal-legend">${calLegend}</div>` : '');
+
     // --- Split-by-project bar chart ---
     const chartEntries = entriesForPeriod(chartPeriod);
     const totalsByProject = {};
@@ -888,10 +963,11 @@
     const barRows = chartProjects.map(p => {
       const val = totalsByProject[p.id] || 0;
       const pct = maxTotal ? (val/maxTotal*100) : 0;
+      const share = grandTotal ? Math.round(val/grandTotal*100) : 0;
       return `<div class="tk-bar-row">
         <div class="tk-bar-label"><span class="tk-dot" style="background:${p.color}"></span>${escapeHtml(p.name)}</div>
         <div class="tk-bar-track"><div class="tk-bar-fill" style="width:${pct}%;background:${p.color}"></div></div>
-        <div class="tk-bar-val">${fmtHM(val)}</div>
+        <div class="tk-bar-val">${fmtHM(val)} · ${share}%</div>
       </div>`;
     }).join('') || `<div class="tk-empty">No time logged for this period yet.</div>`;
 
@@ -1036,6 +1112,18 @@
 
         <div class="tk-panel">
           <div class="tk-panel-head">
+            <h2>Calendar</h2>
+            <div class="tk-cal-nav">
+              <button class="tk-icon-btn" id="tk-cal-prev" title="Previous month">◀</button>
+              <span class="tk-cal-label">${calLabel}</span>
+              <button class="tk-icon-btn" id="tk-cal-next" title="Next month" ${calMonthOffset>=0?'disabled':''}>▶</button>
+            </div>
+          </div>
+          ${calendar}
+        </div>
+
+        <div class="tk-panel">
+          <div class="tk-panel-head">
             <h2>Split by project</h2>
             <div class="tk-chart-controls">
               <label class="tk-pie-toggle"><input type="checkbox" id="tk-pie-toggle" ${chartType==='pie'?'checked':''}/> Pie</label>
@@ -1052,9 +1140,10 @@
 
         <div class="tk-panel">
           <div class="tk-panel-head">
-            <h2>Log</h2>
-            <button class="tk-manual-toggle" id="tk-manual-toggle">${manualFormOpen ? 'Cancel' : '+ Add manual entry'}</button>
+            <h2><button class="tk-caret" id="tk-log-toggle" title="${logCollapsed?'Expand':'Collapse'}">${logCollapsed?'▸':'▾'}</button>Log${logCollapsed && entries.length ? ` <span class="tk-count">${entries.length}</span>` : ''}</h2>
+            ${logCollapsed ? '' : `<button class="tk-manual-toggle" id="tk-manual-toggle">${manualFormOpen ? 'Cancel' : '+ Add manual entry'}</button>`}
           </div>
+          ${logCollapsed ? '' : `
           ${manualFormOpen ? `
           <div class="tk-manual-form">
             <div>
@@ -1087,7 +1176,7 @@
           </div>` : ''}
           <div style="margin-top: ${manualFormOpen ? '16px' : '2px'};">
             ${logRows}
-          </div>
+          </div>`}
         </div>
 
         <div class="tk-panel tk-backup">
@@ -1185,6 +1274,10 @@
     root.querySelectorAll('[data-days]').forEach(el => {
       el.addEventListener('click', () => { daysRange = parseInt(el.getAttribute('data-days'),10); render(); });
     });
+    const calPrev = document.getElementById('tk-cal-prev');
+    if (calPrev) calPrev.addEventListener('click', () => shiftMonth(-1));
+    const calNext = document.getElementById('tk-cal-next');
+    if (calNext) calNext.addEventListener('click', () => shiftMonth(1));
     const pieToggle = document.getElementById('tk-pie-toggle');
     if (pieToggle) pieToggle.addEventListener('change', () => { chartType = pieToggle.checked ? 'pie' : 'bar'; render(); });
 
@@ -1192,6 +1285,8 @@
       el.addEventListener('click', () => deleteEntry(el.getAttribute('data-del-entry')));
     });
 
+    const logToggle = document.getElementById('tk-log-toggle');
+    if (logToggle) logToggle.addEventListener('click', toggleLog);
     const manualToggle = document.getElementById('tk-manual-toggle');
     if (manualToggle) manualToggle.addEventListener('click', () => { manualFormOpen = !manualFormOpen; render(); });
     const manualProjSel = document.getElementById('tk-manual-project');
