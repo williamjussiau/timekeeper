@@ -8,7 +8,8 @@ no cloud, no dependencies.
 
 ## Features
 
-- Projects with tasks, each with its own colour
+- Projects with tasks, each with its own colour. Rename, reorder, or merge
+  tasks as things evolve
 - Start and stop tasks with one click (only one runs at a time)
 - Live timer in the tab title. Press Esc to stop, or resume the last task
 - Today, this-week and this-month totals with optional daily target

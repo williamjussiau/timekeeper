@@ -149,11 +149,16 @@
   .tk-proj-card:last-child { margin-bottom: 0; }
   .tk-proj-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
   .tk-proj-title { display: flex; align-items: center; gap: 8px; font-weight: 600; font-size: 14px; }
-  .tk-task-row { display: grid; grid-template-columns: 1fr auto auto auto; align-items: center; gap: 10px; padding: 6px 0; border-bottom: 1px solid var(--line); }
+  .tk-task-row { display: grid; grid-template-columns: 1fr auto auto auto auto; align-items: center; gap: 10px; padding: 6px 0; border-bottom: 1px solid var(--line); }
   .tk-task-row:last-of-type { border-bottom: none; }
   .tk-task-row.running { background: var(--accent-dim); border-radius: 6px; padding-left: 8px; padding-right: 8px; }
   .tk-task-name { font-size: 13px; }
   .tk-task-today { font-family: var(--font-display); font-size: 12px; color: var(--ink-soft); min-width: 52px; text-align: right; }
+  .tk-merge-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding: 6px 0; border-bottom: 1px solid var(--line); }
+  .tk-merge-row:last-of-type { border-bottom: none; }
+  .tk-merge-label { font-size: 13px; color: var(--ink-soft); }
+  .tk-merge-label b { color: var(--ink); }
+  .tk-merge-row .tk-input { flex: 1 1 130px; min-width: 110px; }
 
   /* --- today summary --- */
   .tk-sum-group { margin-bottom: 12px; }
@@ -295,6 +300,7 @@
   let manualProjectId = null; // which project is selected in the manual-entry form
   let tickHandle = null;
   let editingEntryId = null;   // log entry currently being edited inline
+  let mergingTaskId = null;    // task whose inline "merge into…" row is open
   let collapsed = {};          // projectId -> true when its card is collapsed
   let dailyTargetHours = 0;    // 0 = no target set
   let lastTask = null;         // {projectId, taskId} last tracked, for "resume"
@@ -521,6 +527,30 @@
     if (!confirm('Delete task "' + (t ? t.name : '') + '"? Logged time is kept in the history.')) return;
     if (activeTimer && activeTimer.taskId === id) stopTimer(true);
     tasks = tasks.filter(tk => tk.id !== id);
+    if (mergingTaskId === id) mergingTaskId = null;
+    storageSet('tk-tasks', tasks);
+    render();
+  }
+  // Fold one task into another in the same project: all its logged time is
+  // re-tagged to the target, then the emptied task is removed. No time is lost.
+  function mergeTask(fromId, intoId){
+    const from = tasks.find(tk => tk.id === fromId);
+    const into = tasks.find(tk => tk.id === intoId);
+    if (!from || !into || from.id === into.id || from.projectId !== into.projectId) return;
+    const moved = entries.filter(e => e.taskId === fromId).length;
+    if (!confirm('Move ' + moved + ' logged ' + (moved === 1 ? 'entry' : 'entries') + ' from "' + from.name + '" into "' + into.name + '", then delete "' + from.name + '"?')) return;
+    entries.forEach(e => { if (e.taskId === fromId) e.taskId = intoId; });
+    if (activeTimer && activeTimer.taskId === fromId){
+      activeTimer.taskId = intoId;
+      storageSet('tk-active-timer', activeTimer);
+    }
+    if (lastTask && lastTask.taskId === fromId){
+      lastTask.taskId = intoId;
+      storageSet('tk-last-task', lastTask);
+    }
+    tasks = tasks.filter(tk => tk.id !== fromId);
+    mergingTaskId = null;
+    storageSet('tk-entries', entries);
     storageSet('tk-tasks', tasks);
     render();
   }
@@ -716,12 +746,22 @@
       const taskRows = myTasks.length ? myTasks.map(t => {
         const running = activeTimer && activeTimer.taskId === t.id;
         const todaySec = todaySecByTask[t.id] || 0;
+        if (mergingTaskId === t.id){
+          const siblings = myTasks.filter(o => o.id !== t.id);
+          return `<div class="tk-merge-row">
+            <span class="tk-merge-label">Merge <b>${escapeHtml(t.name)}</b> into</span>
+            <select class="tk-input" id="tk-merge-target">${siblings.map(o => `<option value="${o.id}">${escapeHtml(o.name)}</option>`).join('')}</select>
+            <button class="tk-btn tk-btn-start tk-btn-small" data-merge-confirm="${t.id}">Merge</button>
+            <button class="tk-btn tk-btn-ghost tk-btn-small" data-merge-cancel="1">Cancel</button>
+          </div>`;
+        }
         return `<div class="tk-task-row ${running?'running':''}">
           <span class="tk-task-name" data-rename-task="${t.id}" title="Click to rename">${escapeHtml(t.name)}</span>
           <span class="tk-task-today">${todaySec ? fmtHM(todaySec) : ''}</span>
           ${running
             ? `<button class="tk-btn tk-btn-stop tk-btn-small" data-stop-task="1">Stop</button>`
             : `<button class="tk-btn tk-btn-start tk-btn-small" data-start-project="${p.id}" data-start-task="${t.id}">Start</button>`}
+          ${myTasks.length > 1 ? `<button class="tk-log-del" data-merge-task="${t.id}" title="Merge into another task">⤵</button>` : ''}
           <button class="tk-log-del" data-del-task="${t.id}" title="Delete task">✕</button>
         </div>`;
       }).join('') : `<div class="tk-empty" style="padding:4px 0;">No tasks yet — add one below.</div>`;
@@ -1250,6 +1290,12 @@
     root.querySelectorAll('[data-del-task]').forEach(el => el.addEventListener('click', () => deleteTask(el.getAttribute('data-del-task'))));
     root.querySelectorAll('[data-rename-project]').forEach(el => el.addEventListener('click', () => renameProject(el.getAttribute('data-rename-project'))));
     root.querySelectorAll('[data-rename-task]').forEach(el => el.addEventListener('click', () => renameTask(el.getAttribute('data-rename-task'))));
+    root.querySelectorAll('[data-merge-task]').forEach(el => el.addEventListener('click', () => { mergingTaskId = el.getAttribute('data-merge-task'); render(); }));
+    root.querySelectorAll('[data-merge-cancel]').forEach(el => el.addEventListener('click', () => { mergingTaskId = null; render(); }));
+    root.querySelectorAll('[data-merge-confirm]').forEach(el => el.addEventListener('click', () => {
+      const sel = document.getElementById('tk-merge-target');
+      if (sel) mergeTask(el.getAttribute('data-merge-confirm'), sel.value);
+    }));
     root.querySelectorAll('[data-move-project]').forEach(el => el.addEventListener('click', () => moveProject(el.getAttribute('data-move-project'), parseInt(el.getAttribute('data-dir'),10))));
     root.querySelectorAll('[data-collapse]').forEach(el => el.addEventListener('click', () => toggleCollapse(el.getAttribute('data-collapse'))));
 
