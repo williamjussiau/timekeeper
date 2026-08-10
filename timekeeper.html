@@ -149,7 +149,8 @@
   .tk-proj-card:last-child { margin-bottom: 0; }
   .tk-proj-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
   .tk-proj-title { display: flex; align-items: center; gap: 8px; font-weight: 600; font-size: 14px; }
-  .tk-task-row { display: grid; grid-template-columns: 1fr auto auto auto auto; align-items: center; gap: 10px; padding: 6px 0; border-bottom: 1px solid var(--line); }
+  .tk-task-row { display: grid; grid-template-columns: 1fr auto auto auto; align-items: center; gap: 10px; padding: 6px 0; border-bottom: 1px solid var(--line); }
+  .tk-task-actions { display: flex; align-items: center; gap: 2px; }
   .tk-task-row:last-of-type { border-bottom: none; }
   .tk-task-row.running { background: var(--accent-dim); border-radius: 6px; padding-left: 8px; padding-right: 8px; }
   .tk-task-name { font-size: 13px; }
@@ -574,6 +575,17 @@
     const tmp = projects[i]; projects[i] = projects[j]; projects[j] = tmp;
     storageSet('tk-projects', projects); render();
   }
+  // Reorder a task among its siblings: swap it with the neighbouring task of
+  // the same project, keeping the flat tasks array otherwise untouched.
+  function moveTask(id, dir){
+    const t = tasks.find(tk => tk.id === id); if (!t) return;
+    const sibs = tasks.filter(tk => tk.projectId === t.projectId);
+    const si = sibs.findIndex(tk => tk.id === id);
+    const sj = si + dir; if (sj < 0 || sj >= sibs.length) return;
+    const i = tasks.indexOf(sibs[si]), j = tasks.indexOf(sibs[sj]);
+    const tmp = tasks[i]; tasks[i] = tasks[j]; tasks[j] = tmp;
+    storageSet('tk-tasks', tasks); render();
+  }
   function toggleCollapse(id){
     collapsed[id] = !collapsed[id];
     storageSet('tk-collapsed', collapsed); render();
@@ -743,7 +755,7 @@
       const isCollapsed = !!collapsed[p.id];
       const myTasks = tasks.filter(t => t.projectId === p.id);
       const projTodaySec = myTasks.reduce((s,t) => s + (todaySecByTask[t.id]||0), 0);
-      const taskRows = myTasks.length ? myTasks.map(t => {
+      const taskRows = myTasks.length ? myTasks.map((t, ti) => {
         const running = activeTimer && activeTimer.taskId === t.id;
         const todaySec = todaySecByTask[t.id] || 0;
         if (mergingTaskId === t.id){
@@ -761,8 +773,13 @@
           ${running
             ? `<button class="tk-btn tk-btn-stop tk-btn-small" data-stop-task="1">Stop</button>`
             : `<button class="tk-btn tk-btn-start tk-btn-small" data-start-project="${p.id}" data-start-task="${t.id}">Start</button>`}
-          ${myTasks.length > 1 ? `<button class="tk-log-del" data-merge-task="${t.id}" title="Merge into another task">⤵</button>` : ''}
-          <button class="tk-log-del" data-del-task="${t.id}" title="Delete task">✕</button>
+          <span class="tk-task-actions">
+            ${myTasks.length > 1 ? `
+              <button class="tk-icon-btn" data-move-task="${t.id}" data-dir="-1" title="Move up" ${ti===0?'disabled':''}>▲</button>
+              <button class="tk-icon-btn" data-move-task="${t.id}" data-dir="1" title="Move down" ${ti===myTasks.length-1?'disabled':''}>▼</button>
+              <button class="tk-log-del" data-merge-task="${t.id}" title="Merge into another task">⤵</button>` : ''}
+            <button class="tk-log-del" data-del-task="${t.id}" title="Delete task">✕</button>
+          </span>
         </div>`;
       }).join('') : `<div class="tk-empty" style="padding:4px 0;">No tasks yet — add one below.</div>`;
       const body = isCollapsed ? '' : `
@@ -1297,6 +1314,7 @@
       if (sel) mergeTask(el.getAttribute('data-merge-confirm'), sel.value);
     }));
     root.querySelectorAll('[data-move-project]').forEach(el => el.addEventListener('click', () => moveProject(el.getAttribute('data-move-project'), parseInt(el.getAttribute('data-dir'),10))));
+    root.querySelectorAll('[data-move-task]').forEach(el => el.addEventListener('click', () => moveTask(el.getAttribute('data-move-task'), parseInt(el.getAttribute('data-dir'),10))));
     root.querySelectorAll('[data-collapse]').forEach(el => el.addEventListener('click', () => toggleCollapse(el.getAttribute('data-collapse'))));
 
     const resumeBtn = document.getElementById('tk-resume-btn');
