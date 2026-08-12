@@ -62,14 +62,15 @@
 
   /* --- Timer / dial --- */
   .tk-timer-row { display: flex; gap: 24px; align-items: center; flex-wrap: wrap; }
-  .tk-dial-box { position: relative; width: 132px; height: 132px; flex-shrink: 0; }
+  .tk-dial-box { position: relative; width: 160px; height: 160px; flex-shrink: 0; }
   .tk-dial-box svg { width: 100%; height: 100%; transform: rotate(-90deg); }
   .tk-dial-track { fill: none; stroke: var(--line); stroke-width: 6; }
   .tk-dial-progress { fill: none; stroke: var(--accent); stroke-width: 6; stroke-linecap: round;
     transition: stroke-dashoffset 0.9s linear; }
   .tk-dial-readout {
     position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
-    font-family: var(--font-display); font-size: 17px; font-weight: 600; letter-spacing: 0.02em;
+    font-family: var(--font-display); font-size: 23px; font-weight: 700; letter-spacing: 0.01em;
+    font-variant-numeric: tabular-nums;
   }
   .tk-timer-controls { flex: 1; min-width: 220px; }
   .tk-project-select {
@@ -99,7 +100,16 @@
   .tk-btn:disabled { opacity: 0.4; cursor: not-allowed; }
   .tk-btn-small { padding: 6px 12px; font-size: 12px; }
 
-  .tk-running-label { font-size: 12px; color: var(--ink-soft); margin-top: 10px; min-height: 16px; }
+  /* the running task, called out as the instrument's live readout */
+  .tk-now-task { display: flex; align-items: center; gap: 8px; font-size: 18px; font-weight: 600; margin-bottom: 3px; }
+  .tk-now-since { font-family: var(--font-display); font-size: 12px; color: var(--ink-soft); margin-bottom: 14px; }
+  /* today/week + target progress, surfaced next to the readout */
+  .tk-now-gauge { margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--line); }
+  .tk-gauge-nums { font-size: 12px; color: var(--ink-soft); margin-bottom: 8px; }
+  .tk-gauge-nums b { color: var(--ink); font-family: var(--font-display); }
+  .tk-gauge-track { height: 8px; background: var(--bg); border-radius: 4px; overflow: hidden; }
+  .tk-gauge-fill { height: 100%; border-radius: 4px; transition: width 0.4s ease; }
+  .tk-gauge-cap { font-size: 11px; color: var(--ink-faint); font-family: var(--font-display); margin-top: 5px; }
 
   /* --- add project row --- */
   .tk-add-row { display: flex; gap: 8px; margin-top: 4px; }
@@ -187,7 +197,13 @@
   .tk-tl-total { margin-left: auto; padding-left: 6px; font-family: var(--font-display); font-size: 11px; color: var(--ink-soft); flex-shrink: 0; }
   .tk-tl-track { position: relative; height: 20px; background: var(--bg); border-radius: 4px; }
   .tk-tl-block { position: absolute; top: 3px; height: 14px; border-radius: 3px; min-width: 2px; }
-  .tk-tl-now { position: absolute; top: 0; bottom: 0; width: 2px; background: var(--danger); opacity: 0.7; }
+  .tk-tl-block[data-entry] { cursor: pointer; }
+  .tk-tl-block[data-entry]:hover { outline: 2px solid var(--ink); outline-offset: 1px; }
+  /* "now" is the one element allowed to shout: a crisp hairline with a pulsing cap */
+  .tk-tl-now { position: absolute; top: -2px; bottom: -2px; width: 2px; background: var(--danger); border-radius: 2px; }
+  .tk-tl-now::before { content: ''; position: absolute; top: -3px; left: 50%; transform: translateX(-50%);
+    width: 7px; height: 7px; border-radius: 50%; background: var(--danger); animation: tk-now-pulse 2.2s ease-in-out infinite; }
+  @keyframes tk-now-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
   .tk-tl-axis { margin-top: 2px; }
   .tk-tl-axis .tk-tl-track { height: 14px; background: none; overflow: visible; }
   .tk-tl-tick { position: absolute; top: 0; transform: translateX(-50%); color: var(--ink-faint); font-family: var(--font-display); font-size: 10px; white-space: nowrap; }
@@ -247,7 +263,8 @@
     .tk-bar-row { grid-template-columns: 80px 1fr 84px; }
   }
   @media (prefers-reduced-motion: reduce) {
-    .tk-dial-progress, .tk-bar-fill { transition: none; }
+    .tk-dial-progress, .tk-bar-fill, .tk-gauge-fill { transition: none; }
+    .tk-tl-now::before { animation: none; }
   }
 </style>
 
@@ -295,6 +312,10 @@
   let chartPeriod = 'today';
   let chartType = 'bar'; // 'bar' | 'pie'
   let daysRange = 14; // multi-day timeline span (7 | 14 | 30)
+  // Day-view timelines use a fixed hour scale so days line up for comparison.
+  // The window expands automatically if any tracked time falls outside it.
+  const DAY_VIEW_START_HOUR = 8;  // left edge of "Today" and "Recent days"
+  const DAY_VIEW_END_HOUR = 20;   // right edge (24 = midnight)
   let calMonthOffset = 0; // 0 = current month, -1 = previous, …
   let logCollapsed = true; // Log panel folded by default (it gets long)
   let manualFormOpen = false;
@@ -697,13 +718,6 @@
     const circumference = 2 * Math.PI * 58;
     dial.style.strokeDashoffset = circumference * (1 - sweep/60);
     if (readout) readout.textContent = fmtHMS(elapsed);
-    const label = document.getElementById('tk-running-label');
-    if (label){
-      const p = projects.find(pr => pr.id === activeTimer.projectId);
-      const t = tasks.find(tk => tk.id === activeTimer.taskId);
-      const name = [p && p.name, t && t.name].filter(Boolean).join(' · ');
-      label.textContent = name ? ('Tracking ' + name + ' since ' + new Date(activeTimer.start).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'})) : '';
-    }
     updateTitle();
   }
 
@@ -742,6 +756,23 @@
     // resume target: the last task tracked, if it still exists
     const resume = (!activeTimer && lastTask && projects.some(p => p.id === lastTask.projectId) && tasks.some(t => t.id === lastTask.taskId)) ? lastTask : null;
     const resumeName = resume ? (tasks.find(t => t.id === resume.taskId) || {}).name : '';
+
+    // the running task, called out beside the dial; plus a glanceable today/week/target gauge
+    let nowTaskHtml = '';
+    if (activeTimer){
+      const ap = projects.find(pr => pr.id === activeTimer.projectId);
+      const at = tasks.find(tk => tk.id === activeTimer.taskId);
+      const since = new Date(activeTimer.start).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+      nowTaskHtml = `<div class="tk-now-task"><span class="tk-dot" style="background:${ap ? ap.color : 'var(--accent)'}"></span>${escapeHtml([ap && ap.name, at && at.name].filter(Boolean).join(' · '))}</div>
+        <div class="tk-now-since">since ${since}</div>`;
+    }
+    const gaugeHtml = `<div class="tk-now-gauge">
+      <div class="tk-gauge-nums"><b>${fmtHM(todayTotalSec)}</b> today · <b>${fmtHM(weekTotalSec)}</b> this week</div>
+      ${targetSec
+        ? `<div class="tk-gauge-track"><div class="tk-gauge-fill" style="width:${targetPct}%;background:${targetPct>=100?'#6B8E4E':'var(--accent)'}"></div></div>
+           <div class="tk-gauge-cap">${Math.round(targetPct)}% of ${dailyTargetHours}h target</div>`
+        : ''}
+    </div>`;
 
     // per-task colour: a stable shade of the parent project's colour
     const taskShadeById = {};
@@ -821,7 +852,7 @@
         ${rows}
       </div>`;
     }).join('');
-    const todaySummary = todayGroups || `<div class="tk-empty">Nothing tracked today yet.</div>`;
+    const todaySummary = todayGroups || `<div class="tk-empty">No time on the clock yet today. Press Start on a task to begin.</div>`;
 
     // --- Today's timeline (a lane per project across the hours of the day) ---
     const HOUR = 3600000;
@@ -829,25 +860,25 @@
     const nowMs = Date.now();
     const segsByProject = {}; // projectId -> [{s, e, taskId}] (clamped to today)
     let minMs = Infinity, maxMs = -Infinity;
-    function addSeg(projectId, taskId, startMs, endMs){
+    function addSeg(projectId, taskId, startMs, endMs, entryId){
       const s = Math.max(startMs, dayStartMs);
       if (endMs <= s) return;
-      (segsByProject[projectId] = segsByProject[projectId] || []).push({ s, e: endMs, taskId });
+      (segsByProject[projectId] = segsByProject[projectId] || []).push({ s, e: endMs, taskId, entryId });
       if (s < minMs) minMs = s;
       if (endMs > maxMs) maxMs = endMs;
     }
     entries.forEach(en => {
       const endMs = new Date(en.end).getTime();
-      if (endMs >= dayStartMs) addSeg(en.projectId, en.taskId, new Date(en.start).getTime(), endMs);
+      if (endMs >= dayStartMs) addSeg(en.projectId, en.taskId, new Date(en.start).getTime(), endMs, en.id);
     });
     if (activeTimer) addSeg(activeTimer.projectId, activeTimer.taskId, new Date(activeTimer.start).getTime(), nowMs);
 
     let timeline;
     if (maxMs < 0){
-      timeline = `<div class="tk-empty">Nothing tracked today yet.</div>`;
+      timeline = `<div class="tk-empty">Your day's timeline fills in here once the clock is running.</div>`;
     } else {
-      const rangeStart = Math.floor(minMs / HOUR) * HOUR;
-      let rangeEnd = Math.ceil(maxMs / HOUR) * HOUR;
+      const rangeStart = Math.min(dayStartMs + DAY_VIEW_START_HOUR * HOUR, Math.floor(minMs / HOUR) * HOUR);
+      let rangeEnd = Math.max(dayStartMs + DAY_VIEW_END_HOUR * HOUR, Math.ceil(maxMs / HOUR) * HOUR);
       if (rangeEnd <= rangeStart) rangeEnd = rangeStart + HOUR;
       const span = rangeEnd - rangeStart;
       const pct = ms => ((ms - rangeStart) / span) * 100;
@@ -865,9 +896,9 @@
         const total = segs.reduce((s, seg) => s + (seg.e - seg.s) / 1000, 0);
         const blocks = segs.map(seg => {
           const t = tasks.find(tk => tk.id === seg.taskId);
-          const tip = (t ? t.name : '(task)') + ' · ' + hhmm(seg.s) + '–' + hhmm(seg.e) + ' (' + fmtHM((seg.e - seg.s) / 1000) + ')';
+          const tip = (t ? t.name : '(task)') + ' · ' + hhmm(seg.s) + '–' + hhmm(seg.e) + ' (' + fmtHM((seg.e - seg.s) / 1000) + ')' + (seg.entryId ? ' · click to edit' : '');
           const w = Math.max(pct(seg.e) - pct(seg.s), 0.5);
-          return `<div class="tk-tl-block" style="left:${pct(seg.s)}%;width:${w}%;background:${taskShadeById[seg.taskId] || p.color}" title="${escapeHtml(tip)}"></div>`;
+          return `<div class="tk-tl-block"${seg.entryId ? ` data-entry="${seg.entryId}"` : ''} style="left:${pct(seg.s)}%;width:${w}%;background:${taskShadeById[seg.taskId] || p.color}" title="${escapeHtml(tip)}"></div>`;
         }).join('');
         return `<div class="tk-tl-row">
           <div class="tk-tl-label"><span class="tk-dot" style="background:${p.color}"></span><span class="tk-tl-name">${escapeHtml(p.name)}</span><span class="tk-tl-total">${fmtHM(total)}</span></div>
@@ -916,8 +947,8 @@
     if (!dayKeys.length){
       multiDay = `<div class="tk-empty">No time tracked in the last ${daysRange} days.</div>`;
     } else {
-      const rmStart = Math.floor(dMin / 60) * 60;      // whole-hour bounds (minutes)
-      let rmEnd = Math.ceil(dMax / 60) * 60;
+      const rmStart = Math.min(DAY_VIEW_START_HOUR * 60, Math.floor(dMin / 60) * 60);  // whole-hour bounds (minutes)
+      let rmEnd = Math.max(DAY_VIEW_END_HOUR * 60, Math.ceil(dMax / 60) * 60);
       if (rmEnd <= rmStart) rmEnd = rmStart + 60;
       const mspan = rmEnd - rmStart;
       const mpct = min => ((min - rmStart) / mspan) * 100;
@@ -928,6 +959,10 @@
         mticks += `<div class="tk-tl-tick" style="left:${mpct(m)}%"><span>${hLabel(m)}</span></div>`;
       }
 
+      const todayKey = startOfDay(new Date()).getTime();
+      const nowMin = (Date.now() - todayKey) / MIN;
+      const nowMarker = (nowMin >= rmStart && nowMin <= rmEnd)
+        ? `<div class="tk-tl-now" style="left:${mpct(nowMin)}%" title="now"></div>` : '';
       const dayRows = dayKeys.map(dk => {
         const segs = segsByDay[dk];
         const totalSec = segs.reduce((s, seg) => s + (seg.endMin - seg.startMin) * 60, 0);
@@ -941,7 +976,7 @@
         }).join('');
         return `<div class="tk-tl-row">
           <div class="tk-tl-label"><span class="tk-tl-name">${escapeHtml(label)}</span><span class="tk-tl-total">${fmtHM(totalSec)}</span></div>
-          <div class="tk-tl-track">${blocks}</div>
+          <div class="tk-tl-track">${blocks}${dk === todayKey ? nowMarker : ''}</div>
         </div>`;
       }).join('');
 
@@ -1081,7 +1116,7 @@
         <button class="tk-log-del" data-edit-entry="${e.id}" title="Edit entry">✎</button>
         <button class="tk-log-del" data-del-entry="${e.id}" title="Delete entry">✕</button>
       </div>`;
-    }).join('') : `<div class="tk-empty">No entries logged yet.</div>`;
+    }).join('') : `<div class="tk-empty">No entries yet. Track a task or add one manually below.</div>`;
 
     // manual-entry form dropdowns
     if (manualProjectId === null || !projects.some(p => p.id === manualProjectId)) manualProjectId = projects.length ? projects[0].id : null;
@@ -1111,11 +1146,12 @@
             </div>
             <div class="tk-timer-controls">
               ${activeTimer
-                ? `<button class="tk-btn tk-btn-stop" id="tk-stop-btn">Stop tracking</button>
+                ? `${nowTaskHtml}
+                   <button class="tk-btn tk-btn-stop" id="tk-stop-btn">Stop tracking</button>
                    <span class="tk-kbd-hint">or press Esc</span>`
                 : `<div class="tk-empty">Not tracking. Press <strong>Start</strong> on any task below.</div>
                    ${resume ? `<button class="tk-btn tk-btn-start tk-btn-small" id="tk-resume-btn" style="margin-top:10px;">▶ Resume ${escapeHtml(resumeName)}</button>` : ''}`}
-              <div id="tk-running-label" class="tk-running-label"></div>
+              ${gaugeHtml}
             </div>
           </div>
         </div>
@@ -1144,8 +1180,7 @@
             <label class="tk-target-label">Daily target (h)
               <input class="tk-input tk-target-input" type="number" min="0" step="0.5" id="tk-daily-target" value="${dailyTargetHours || ''}" placeholder="—"/>
             </label>
-            ${targetSec ? `<div class="tk-bar-track" style="flex:1;"><div class="tk-bar-fill" style="width:${targetPct}%;background:${targetPct>=100?'#6B8E4E':'var(--accent)'}"></div></div>
-            <span class="tk-bar-val">${Math.round(targetPct)}%</span>` : `<span class="tk-empty">Set a target to see daily progress.</span>`}
+            ${targetSec ? '' : `<span class="tk-empty">Set a target to track daily progress.</span>`}
           </div>
           ${todaySummary}
         </div>
@@ -1325,6 +1360,14 @@
 
     root.querySelectorAll('[data-edit-entry]').forEach(el => el.addEventListener('click', () => { editingEntryId = el.getAttribute('data-edit-entry'); render(); }));
     root.querySelectorAll('[data-cancel-entry]').forEach(el => el.addEventListener('click', () => { editingEntryId = null; render(); }));
+    // click a timeline block to jump straight to editing that entry (unfolds the Log)
+    root.querySelectorAll('.tk-tl-block[data-entry]').forEach(el => el.addEventListener('click', () => {
+      editingEntryId = el.getAttribute('data-entry');
+      if (logCollapsed){ logCollapsed = false; storageSet('tk-log-collapsed', false); }
+      render();
+      const row = root.querySelector('[data-edit-row="'+editingEntryId+'"]');
+      if (row) row.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }));
     root.querySelectorAll('[data-save-entry]').forEach(el => el.addEventListener('click', () => {
       const id = el.getAttribute('data-save-entry');
       const row = root.querySelector('[data-edit-row="'+id+'"]');
