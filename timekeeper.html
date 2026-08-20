@@ -199,6 +199,15 @@
   .tk-tl-block { position: absolute; top: 3px; height: 14px; border-radius: 3px; min-width: 2px; }
   .tk-tl-block[data-entry] { cursor: pointer; }
   .tk-tl-block[data-entry]:hover { outline: 2px solid var(--ink); outline-offset: 1px; }
+  /* resize grips at each end of a logged block; appear on hover, drag to adjust start/end */
+  .tk-tl-handle { position: absolute; top: 0; bottom: 0; width: 8px; cursor: ew-resize; opacity: 0; touch-action: none; z-index: 2; }
+  .tk-tl-handle-l { left: -4px; }
+  .tk-tl-handle-r { right: -4px; }
+  .tk-tl-block[data-entry]:hover .tk-tl-handle, .tk-tl-block.tk-tl-dragging .tk-tl-handle { opacity: 1; }
+  .tk-tl-handle::after { content: ''; position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+    width: 2px; height: 12px; background: var(--ink); border-radius: 1px; opacity: 0.75; }
+  .tk-tl-block.tk-tl-dragging { outline: 2px solid var(--ink); outline-offset: 1px; z-index: 3; }
+  .tk-tl-merge-armed { outline: 2px dashed var(--accent) !important; outline-offset: 2px; }
   /* "now" is the one element allowed to shout: a crisp hairline with a pulsing cap */
   .tk-tl-now { position: absolute; top: -2px; bottom: -2px; width: 2px; background: var(--danger); border-radius: 2px; }
   .tk-tl-now::before { content: ''; position: absolute; top: -3px; left: 50%; transform: translateX(-50%);
@@ -320,7 +329,10 @@
   let logCollapsed = true; // Log panel folded by default (it gets long)
   let manualFormOpen = false;
   let manualProjectId = null; // which project is selected in the manual-entry form
+  let manualPrefill = null;   // {projectId, date, start, end} seeding the manual form from a timeline gap
   let tickHandle = null;
+  let lastTickMinute = -1;      // wall-clock minute of the last live timeline refresh
+  let tlDragging = false;       // true while a Today-timeline block edge is being dragged
   let editingEntryId = null;   // log entry currently being edited inline
   let mergingTaskId = null;    // task whose inline "merge into…" row is open
   let collapsed = {};          // projectId -> true when its card is collapsed
@@ -503,6 +515,7 @@
   }
   function startTicking(){
     stopTicking();
+    lastTickMinute = Math.floor(Date.now() / 60000); // refresh at the next minute boundary, not 1s in
     tickHandle = setInterval(updateDialOnly, 1000);
   }
   function stopTicking(){
@@ -645,6 +658,7 @@
     entries.push({ id: uid(), projectId, taskId, start: start.toISOString(), end: end.toISOString(), note: note||'' });
     storageSet('tk-entries', entries);
     manualFormOpen = false;
+    manualPrefill = null;
     render();
   }
 
@@ -719,6 +733,17 @@
     dial.style.strokeDashoffset = circumference * (1 - sweep/60);
     if (readout) readout.textContent = fmtHMS(elapsed);
     updateTitle();
+    // Grow the timelines live: rebuild once per minute so the running task's
+    // block and the now-line advance without waiting for the timer to stop.
+    // Skip the rebuild while a field is focused so it never clobbers an
+    // in-progress rename or inline log edit.
+    const minute = Math.floor(Date.now() / 60000);
+    if (minute !== lastTickMinute){
+      lastTickMinute = minute;
+      const ae = document.activeElement;
+      const typing = ae && (ae.tagName === 'INPUT' || ae.tagName === 'TEXTAREA' || ae.tagName === 'SELECT' || ae.isContentEditable);
+      if (!typing && !tlDragging) render();
+    }
   }
 
   function render(){
@@ -896,17 +921,23 @@
         const total = segs.reduce((s, seg) => s + (seg.e - seg.s) / 1000, 0);
         const blocks = segs.map(seg => {
           const t = tasks.find(tk => tk.id === seg.taskId);
-          const tip = (t ? t.name : '(task)') + ' · ' + hhmm(seg.s) + '–' + hhmm(seg.e) + ' (' + fmtHM((seg.e - seg.s) / 1000) + ')' + (seg.entryId ? ' · click to edit' : '');
+          const isEntry = !!seg.entryId; // running-timer segment has no entryId: shown, but not draggable
+          const tip = (t ? t.name : '(task)') + ' · ' + hhmm(seg.s) + '–' + hhmm(seg.e) + ' (' + fmtHM((seg.e - seg.s) / 1000) + ')' + (isEntry ? ' · click to edit, drag edges to adjust' : '');
           const w = Math.max(pct(seg.e) - pct(seg.s), 0.5);
-          return `<div class="tk-tl-block"${seg.entryId ? ` data-entry="${seg.entryId}"` : ''} style="left:${pct(seg.s)}%;width:${w}%;background:${taskShadeById[seg.taskId] || p.color}" title="${escapeHtml(tip)}"></div>`;
+          // data-start/data-end on every block feed collision + hole detection; only entries carry pid/tid + handles
+          const attrs = isEntry
+            ? ` data-entry="${seg.entryId}" data-start="${seg.s}" data-end="${seg.e}" data-pid="${p.id}" data-tid="${seg.taskId}"`
+            : ` data-start="${seg.s}" data-end="${seg.e}"`;
+          const handles = isEntry ? '<span class="tk-tl-handle tk-tl-handle-l"></span><span class="tk-tl-handle tk-tl-handle-r"></span>' : '';
+          return `<div class="tk-tl-block${isEntry ? ' tk-tl-entry' : ''}"${attrs} style="left:${pct(seg.s)}%;width:${w}%;background:${taskShadeById[seg.taskId] || p.color}" title="${escapeHtml(tip)}">${handles}</div>`;
         }).join('');
         return `<div class="tk-tl-row">
           <div class="tk-tl-label"><span class="tk-dot" style="background:${p.color}"></span><span class="tk-tl-name">${escapeHtml(p.name)}</span><span class="tk-tl-total">${fmtHM(total)}</span></div>
-          <div class="tk-tl-track">${blocks}${nowMarker}</div>
+          <div class="tk-tl-track" data-lane="${p.id}" data-range-start="${rangeStart}" data-span="${span}">${blocks}${nowMarker}</div>
         </div>`;
       }).join('');
 
-      timeline = `<div class="tk-tl">
+      timeline = `<div class="tk-tl" id="tk-today-tl">
         ${lanes}
         <div class="tk-tl-row tk-tl-axis"><div class="tk-tl-label"></div><div class="tk-tl-track">${ticks}</div></div>
       </div>`;
@@ -932,7 +963,9 @@
         s = segEnd;
       }
     }
-    const rangeFromMs = startOfDay(new Date(Date.now() - (daysRange - 1) * 86400000)).getTime();
+    const rangeFromMs = daysRange === 'week'
+      ? startOfWeek(new Date()).getTime()  // this week = from Monday, matching the week gauge
+      : startOfDay(new Date(Date.now() - (daysRange - 1) * 86400000)).getTime();
     entries.forEach(en => {
       const startMs = new Date(en.start).getTime(), endMs = new Date(en.end).getTime();
       if (endMs > rangeFromMs && endMs > startMs) addDaySeg(Math.max(startMs, rangeFromMs), endMs, en.projectId, en.taskId);
@@ -945,7 +978,7 @@
     let multiDay;
     const dayKeys = Object.keys(segsByDay).map(Number).sort((a,b) => b - a); // most recent first
     if (!dayKeys.length){
-      multiDay = `<div class="tk-empty">No time tracked in the last ${daysRange} days.</div>`;
+      multiDay = `<div class="tk-empty">No time tracked ${daysRange === 'week' ? 'this week' : 'in the last ' + daysRange + ' days'}.</div>`;
     } else {
       const rmStart = Math.min(DAY_VIEW_START_HOUR * 60, Math.floor(dMin / 60) * 60);  // whole-hour bounds (minutes)
       let rmEnd = Math.max(DAY_VIEW_END_HOUR * 60, Math.ceil(dMax / 60) * 60);
@@ -966,7 +999,8 @@
       const dayRows = dayKeys.map(dk => {
         const segs = segsByDay[dk];
         const totalSec = segs.reduce((s, seg) => s + (seg.endMin - seg.startMin) * 60, 0);
-        const label = new Date(dk).toLocaleDateString(undefined, { weekday: 'short', day: 'numeric' });
+        const ld = new Date(dk); // build "Wed 12" explicitly so weekday leads regardless of locale order
+        const label = ld.toLocaleDateString(undefined, { weekday: 'short' }) + ' ' + ld.getDate();
         const blocks = segs.map(seg => {
           const p = projects.find(pr => pr.id === seg.projectId);
           const t = tasks.find(tk => tk.id === seg.taskId);
@@ -1111,7 +1145,7 @@
       return `<div class="tk-log-row">
         <span class="tk-dot" style="background:${p?p.color:'#ccc'}"></span>
         <div class="tk-log-proj">${label}${e.note ? `<span class="tk-log-note">${escapeHtml(e.note)}</span>` : ''}</div>
-        <div class="tk-log-date">${s.toLocaleDateString(undefined,{month:'short',day:'numeric'})} · ${s.toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'})}</div>
+        <div class="tk-log-date">${s.toLocaleDateString(undefined,{weekday:'short',month:'short',day:'numeric'})} · ${s.toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'})}</div>
         <div class="tk-log-dur">${fmtHM(durationOf(e))}</div>
         <button class="tk-log-del" data-edit-entry="${e.id}" title="Edit entry">✎</button>
         <button class="tk-log-del" data-del-entry="${e.id}" title="Delete entry">✕</button>
@@ -1194,6 +1228,7 @@
           <div class="tk-panel-head">
             <h2>Recent days</h2>
             <div class="tk-tabs">
+              <div class="tk-tab ${daysRange==='week'?'active':''}" data-days="week">This week</div>
               <div class="tk-tab ${daysRange===7?'active':''}" data-days="7">7 days</div>
               <div class="tk-tab ${daysRange===14?'active':''}" data-days="14">14 days</div>
               <div class="tk-tab ${daysRange===30?'active':''}" data-days="30">30 days</div>
@@ -1248,15 +1283,15 @@
             </div>
             <div>
               <label>Date</label>
-              <input class="tk-input" type="date" id="tk-manual-date" value="${fmtDateInput(new Date())}"/>
+              <input class="tk-input" type="date" id="tk-manual-date" value="${manualPrefill ? manualPrefill.date : fmtDateInput(new Date())}"/>
             </div>
             <div>
               <label>Start</label>
-              <input class="tk-input" type="time" id="tk-manual-start"/>
+              <input class="tk-input" type="time" id="tk-manual-start" value="${manualPrefill ? manualPrefill.start : ''}"/>
             </div>
             <div>
               <label>End</label>
-              <input class="tk-input" type="time" id="tk-manual-end"/>
+              <input class="tk-input" type="time" id="tk-manual-end" value="${manualPrefill ? manualPrefill.end : ''}"/>
             </div>
             <div style="grid-column:1/-1;">
               <label>Note (optional)</label>
@@ -1368,6 +1403,15 @@
       const row = root.querySelector('[data-edit-row="'+editingEntryId+'"]');
       if (row) row.scrollIntoView({ behavior: 'smooth', block: 'center' });
     }));
+    // drag a block's edge to resize it; the handle swallows the click so it never opens the editor
+    root.querySelectorAll('#tk-today-tl .tk-tl-handle').forEach(h => {
+      h.addEventListener('click', e => e.stopPropagation());
+      h.addEventListener('pointerdown', e => startEdgeDrag(e, h));
+    });
+    // double-click a gap in a lane to add a manual entry sized to the hole
+    root.querySelectorAll('#tk-today-tl .tk-tl-track[data-lane]').forEach(tr => {
+      tr.addEventListener('dblclick', e => openHoleEntry(tr, e));
+    });
     root.querySelectorAll('[data-save-entry]').forEach(el => el.addEventListener('click', () => {
       const id = el.getAttribute('data-save-entry');
       const row = root.querySelector('[data-edit-row="'+id+'"]');
@@ -1379,7 +1423,7 @@
       el.addEventListener('click', () => { chartPeriod = el.getAttribute('data-period'); render(); });
     });
     root.querySelectorAll('[data-days]').forEach(el => {
-      el.addEventListener('click', () => { daysRange = parseInt(el.getAttribute('data-days'),10); render(); });
+      el.addEventListener('click', () => { const v = el.getAttribute('data-days'); daysRange = v === 'week' ? 'week' : parseInt(v,10); render(); });
     });
     const calPrev = document.getElementById('tk-cal-prev');
     if (calPrev) calPrev.addEventListener('click', () => shiftMonth(-1));
@@ -1395,7 +1439,7 @@
     const logToggle = document.getElementById('tk-log-toggle');
     if (logToggle) logToggle.addEventListener('click', toggleLog);
     const manualToggle = document.getElementById('tk-manual-toggle');
-    if (manualToggle) manualToggle.addEventListener('click', () => { manualFormOpen = !manualFormOpen; render(); });
+    if (manualToggle) manualToggle.addEventListener('click', () => { manualFormOpen = !manualFormOpen; manualPrefill = null; render(); });
     const manualProjSel = document.getElementById('tk-manual-project');
     if (manualProjSel) manualProjSel.addEventListener('change', () => { manualProjId(manualProjSel.value); });
     const manualSave = document.getElementById('tk-manual-save');
@@ -1423,6 +1467,111 @@
   }
 
   function manualProjId(id){ manualProjectId = id; render(); }
+
+  // --- Today's timeline: drag a block edge to adjust its start/end -------------
+  // Collision is global (no two activities at once): an edge stops at the nearest
+  // other tracked interval in time, across every lane. A neighbour of the SAME
+  // activity (project + task) is absorbed instead of blocked — the two merge.
+  function startEdgeDrag(ev, handle){
+    ev.preventDefault(); ev.stopPropagation();
+    const block = handle.parentElement;
+    const track = block.parentElement;
+    const id = block.getAttribute('data-entry');
+    const entry = entries.find(x => x.id === id); if (!entry) return;
+    const edge = handle.classList.contains('tk-tl-handle-r') ? 'end' : 'start';
+    const rangeStart = +track.dataset.rangeStart, span = +track.dataset.span;
+    const rangeEnd = rangeStart + span;
+    const trackW = track.getBoundingClientRect().width || 1;
+    const MIN = 60000; // 1-minute floor on a block's duration
+    const S0 = +block.getAttribute('data-start'), E0 = +block.getAttribute('data-end');
+    const pid = block.getAttribute('data-pid'), tid = block.getAttribute('data-tid');
+    // every other tracked interval today (logged entries + the running block)
+    const occ = [...document.querySelectorAll('#tk-today-tl .tk-tl-block[data-start]')]
+      .filter(b => b !== block)
+      .map(b => ({ el:b, s:+b.getAttribute('data-start'), e:+b.getAttribute('data-end'),
+                   same: b.getAttribute('data-pid') === pid && b.getAttribute('data-tid') === tid }));
+    const snap = ms => Math.round(ms / 60000) * 60000;
+    const pctOf = ms => ((ms - rangeStart) / span) * 100;
+    let curStart = S0, curEnd = E0, mergeTarget = null;
+    tlDragging = true;
+    block.classList.add('tk-tl-dragging');
+    document.body.style.userSelect = 'none';
+
+    function disarm(){ if (mergeTarget){ mergeTarget.el.classList.remove('tk-tl-merge-armed'); block.classList.remove('tk-tl-merge-armed'); mergeTarget = null; } }
+
+    function onMove(e){
+      const dms = (e.clientX - ev.clientX) / trackW * span;
+      disarm();
+      if (edge === 'end'){
+        let v = snap(E0 + dms);
+        v = Math.max(v, S0 + MIN);
+        v = Math.min(v, rangeEnd);
+        const R1 = occ.filter(o => o.s >= E0).sort((a,b) => a.s - b.s)[0]; // nearest to the right
+        if (R1){
+          if (R1.same){ v = Math.min(v, R1.e); if (v >= R1.s) mergeTarget = R1; }
+          else { v = Math.min(v, R1.s); }
+        }
+        curEnd = v;
+      } else {
+        let v = snap(S0 + dms);
+        v = Math.min(v, E0 - MIN);
+        v = Math.max(v, rangeStart);
+        const L1 = occ.filter(o => o.e <= S0).sort((a,b) => b.e - a.e)[0]; // nearest to the left
+        if (L1){
+          if (L1.same){ v = Math.max(v, L1.s); if (v <= L1.e) mergeTarget = L1; }
+          else { v = Math.max(v, L1.e); }
+        }
+        curStart = v;
+      }
+      if (mergeTarget){ mergeTarget.el.classList.add('tk-tl-merge-armed'); block.classList.add('tk-tl-merge-armed'); }
+      block.style.left = pctOf(curStart) + '%';
+      block.style.width = Math.max(pctOf(curEnd) - pctOf(curStart), 0.5) + '%';
+    }
+    function onUp(){
+      document.removeEventListener('pointermove', onMove);
+      document.removeEventListener('pointerup', onUp);
+      document.body.style.userSelect = '';
+      tlDragging = false;
+      let s = curStart, en = curEnd;
+      if (mergeTarget){
+        s = Math.min(s, mergeTarget.s); en = Math.max(en, mergeTarget.e);
+        const other = entries.find(x => x.id === mergeTarget.el.getAttribute('data-entry'));
+        if (other && other.id !== entry.id) entries = entries.filter(x => x.id !== other.id);
+      }
+      entry.start = new Date(s).toISOString();
+      entry.end = new Date(en).toISOString();
+      storageSet('tk-entries', entries);
+      render();
+    }
+    document.addEventListener('pointermove', onMove);
+    document.addEventListener('pointerup', onUp);
+  }
+
+  // Double-click empty timeline space -> open the Log's manual form, pre-sized to
+  // the surrounding GLOBAL gap (time when nothing is tracked), project = clicked lane.
+  function openHoleEntry(track, ev){
+    if (ev.target.closest('.tk-tl-block')) return; // clicked a block, not a hole
+    const rangeStart = +track.dataset.rangeStart, span = +track.dataset.span;
+    const rangeEnd = rangeStart + span;
+    const rect = track.getBoundingClientRect();
+    const frac = Math.min(Math.max((ev.clientX - rect.left) / rect.width, 0), 1);
+    const ms = rangeStart + frac * span;
+    const occ = [...document.querySelectorAll('#tk-today-tl .tk-tl-block[data-start]')]
+      .map(b => ({ s:+b.getAttribute('data-start'), e:+b.getAttribute('data-end') }));
+    if (occ.some(o => ms >= o.s && ms < o.e)) return; // occupied in some lane -> not a global hole
+    let gapStart = rangeStart, gapEnd = rangeEnd;
+    occ.forEach(o => { if (o.e <= ms && o.e > gapStart) gapStart = o.e; if (o.s >= ms && o.s < gapEnd) gapEnd = o.s; });
+    gapStart = Math.round(gapStart / 60000) * 60000; gapEnd = Math.round(gapEnd / 60000) * 60000;
+    if (gapEnd - gapStart < 60000) return; // nothing meaningful to fill
+    manualPrefill = { projectId: track.getAttribute('data-lane'), date: fmtDateInput(new Date(gapStart)),
+                      start: fmtTimeInput(new Date(gapStart)), end: fmtTimeInput(new Date(gapEnd)) };
+    manualProjectId = manualPrefill.projectId;
+    manualFormOpen = true;
+    if (logCollapsed){ logCollapsed = false; storageSet('tk-log-collapsed', false); }
+    render();
+    const f = root.querySelector('.tk-manual-form');
+    if (f) f.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  }
 
   function escapeHtml(s){
     return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
