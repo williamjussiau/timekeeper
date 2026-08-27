@@ -13,13 +13,16 @@ no cloud, no dependencies.
 - Start and stop tasks with one click (only one runs at a time)
 - Live timer in the tab title. Press Esc to stop, or resume the last task
 - Today, this-week and this-month totals with optional daily target
-- A guard against forgetting to stop the timer
+- A guard against forgetting to stop the timer: it prompts when a timer has run
+  very long or across a day, re-checks when you return to the tab, and flags any
+  logged session over 8 hours so you can correct it or mark it as normal
 - A day timeline (tasks shown as shades of the project colour) and a multi-day
   "Recent days" view to compare days at a glance
 - A month calendar with each day coloured by the projects worked
 - Split-by-project chart (bars or pie, with percentages), filterable by
   today/week/month/all
 - Light and dark mode
+- 24-hour time throughout, including the log editor
 - Editable log for notes and manual time entries
 - Export to JSON or CSV, and import from JSON. Data is stored in your browser
 
@@ -44,6 +47,8 @@ on Windows).
 ## Design intent
 
 The design is intentionally minimal. All data stays local on your machine.
+A small mascot — "Le Chaton Fat" by Mistral AI — sits by the dial while a timer
+runs.
 
 ## License
 
