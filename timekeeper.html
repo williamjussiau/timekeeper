@@ -192,6 +192,7 @@
   .tk-manual-toggle { font-size: 12px; color: var(--ink-soft); cursor: pointer; text-decoration: underline; text-underline-offset: 2px; background:none; border:none; padding:0; }
   .tk-manual-form { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; margin-top: 12px; }
   .tk-manual-form label { font-size: 11px; color: var(--ink-soft); display:block; margin-bottom: 4px; }
+  .tk-date-hint { display: block; font-size: 11px; color: var(--ink-soft); margin-top: 4px; }
 
   .tk-footnote { font-size: 11px; color: var(--ink-faint); text-align: center; margin-top: 18px; }
 
@@ -256,13 +257,35 @@
   .tk-tl-block.tk-tl-dragging { outline: 2px solid var(--ink); outline-offset: 1px; z-index: 3; }
   .tk-tl-merge-armed { outline: 2px dashed var(--accent) !important; outline-offset: 2px; }
   /* "now" is the one element allowed to shout: a crisp hairline with a pulsing cap */
-  .tk-tl-now { position: absolute; top: -2px; bottom: -2px; width: 2px; background: var(--danger); border-radius: 2px; }
+  .tk-tl-now { position: absolute; top: -2px; bottom: -2px; width: 2px; background: var(--danger); border-radius: 2px; z-index: 2; }
   .tk-tl-now::before { content: ''; position: absolute; top: -3px; left: 50%; transform: translateX(-50%);
     width: 7px; height: 7px; border-radius: 50%; background: var(--danger); animation: tk-now-pulse 2.2s ease-in-out infinite; }
   @keyframes tk-now-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
+  /* faint hour gridlines drawn across every lane; click-through, under the "now" line */
+  .tk-tl-lanes { position: relative; }
+  .tk-tl-gridlines { position: absolute; inset: 0; display: grid; grid-template-columns: 140px 1fr; gap: 10px; pointer-events: none; z-index: 1; }
+  .tk-tl-gridlines-track { grid-column: 2; position: relative; }
+  .tk-tl-hline { position: absolute; top: 0; bottom: 0; border-left: 1px dashed var(--ink-faint); opacity: 0.55; }
   .tk-tl-axis { margin-top: 2px; }
   .tk-tl-axis .tk-tl-track { height: 14px; background: none; overflow: visible; }
   .tk-tl-tick { position: absolute; top: 0; transform: translateX(-50%); color: var(--ink-faint); font-family: var(--font-display); font-size: 10px; white-space: nowrap; }
+  /* --- drop palette: drag a task chip onto the timeline to log a block --- */
+  .tk-tl-palette { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 0 0 10px; }
+  .tk-tl-palette-lbl { font-size: 11px; color: var(--ink-faint); margin-right: 2px; }
+  .tk-tl-chip { font-size: 11px; line-height: 1; padding: 5px 9px; border-radius: 999px; border: 1px solid rgba(0,0,0,0.14);
+    cursor: grab; touch-action: none; user-select: none; display: inline-flex; align-items: center; gap: 5px; font-family: inherit; }
+  .tk-tl-chip:active { cursor: grabbing; }
+  .tk-tl-chip-dot { width: 8px; height: 8px; border-radius: 50%; box-shadow: 0 0 0 1px rgba(255,255,255,0.65); flex-shrink: 0; }
+  /* pill that follows the cursor while dragging a chip onto the timeline */
+  .tk-tl-chip-ghost { position: fixed; z-index: 9999; pointer-events: none; font-size: 11px; line-height: 1; padding: 5px 9px;
+    border-radius: 999px; box-shadow: 0 4px 14px rgba(0,0,0,0.28); transform: translate(-50%, -150%); white-space: nowrap; }
+  .tk-tl-chip-ghost.invalid { opacity: 0.45; }
+  /* vertical guide + time label showing where the dropped block will start */
+  .tk-tl-guide { position: absolute; top: -2px; bottom: -2px; width: 2px; background: var(--ink); border-radius: 2px; z-index: 4; pointer-events: none; }
+  .tk-tl-guide::after { content: attr(data-t); position: absolute; top: -15px; left: 50%; transform: translateX(-50%);
+    font-family: var(--font-display); font-size: 10px; color: var(--ink); background: var(--panel); padding: 0 3px; border-radius: 3px; white-space: nowrap; }
+  .tk-tl-track.tk-tl-drop-reject { animation: tk-tl-shake 0.3s; }
+  @keyframes tk-tl-shake { 0%,100% { transform: translateX(0); } 25% { transform: translateX(-3px); } 75% { transform: translateX(3px); } }
 
   /* --- month calendar --- */
   .tk-cal-nav { display: flex; align-items: center; gap: 8px; }
@@ -323,6 +346,7 @@
     .tk-tl-now::before { animation: none; }
     .tk-cat, .tk-cat.jumping { animation: none; }
     .tk-cat-stack .tk-cat { transition: none; }
+    .tk-tl-track.tk-tl-drop-reject { animation: none; }
   }
 </style>
 
@@ -362,6 +386,12 @@
     const spread = 34; // total lightness points across all tasks
     const nl = Math.max(24, Math.min(82, (l - spread/2) + idx * (spread/(count-1))));
     return hslToHex(h, s, nl);
+  }
+  // pick readable text colour for a coloured chip: dark ink on light, white on dark
+  function textOn(hex){
+    const m = /^#?([0-9a-fA-F]{6})$/.exec(hex || ''); if (!m) return 'var(--ink)';
+    const n = parseInt(m[1], 16), r = (n>>16)&255, g = (n>>8)&255, b = n&255;
+    return (0.299*r + 0.587*g + 0.114*b) > 150 ? '#1D2B3A' : '#ffffff';
   }
   let projects = [];   // {id, name, color, isBreak}
   let tasks = [];      // {id, projectId, name}
@@ -566,6 +596,12 @@
   function startOfDay(d){ const dt = new Date(d); dt.setHours(0,0,0,0); return dt; }
   function startOfMonth(d){ const dt = new Date(d); dt.setHours(0,0,0,0); dt.setDate(1); return dt; }
   function fmtDateInput(d){ return d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0'); }
+  // "2026-09-07" -> "Mon 07/09/26" (weekday + DD/MM/YY), locale-independent of the native picker
+  function fmtDateHint(iso){
+    const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso || ''); if (!m) return '';
+    const d = new Date(+m[1], +m[2]-1, +m[3]); // local date, no UTC shift
+    return d.toLocaleDateString(undefined,{weekday:'short'}) + ' ' + m[3] + '/' + m[2] + '/' + m[1].slice(-2);
+  }
   function fmtTimeInput(d){ return String(d.getHours()).padStart(2,'0') + ':' + String(d.getMinutes()).padStart(2,'0'); }
   // Read a user-typed 24-hour time and return a canonical "HH:MM", or null if invalid.
   // Accepts "9:30", "09:30", "9h30", "9.30", "930", "0930", "9". AM/PM text is rejected.
@@ -1159,8 +1195,29 @@
         </div>`;
       }).join('');
 
+      // drop palette: one chip per non-done task, painted in its timeline shade
+      const paletteHtml = tasks.some(t => !t.done)
+        ? `<div class="tk-tl-palette"><span class="tk-tl-palette-lbl">Drag onto the timeline to log:</span>${
+            projects.filter(p => tasks.some(t => t.projectId === p.id && !t.done)).map(p =>
+              tasks.filter(t => t.projectId === p.id && !t.done).map(t => {
+                const shade = taskShadeById[t.id] || p.color;
+                return `<button class="tk-tl-chip" data-drop-pid="${p.id}" data-drop-tid="${t.id}" style="background:${shade};color:${textOn(shade)}" title="Drag onto the timeline: ${escapeHtml(p.name)} · ${escapeHtml(t.name)}"><span class="tk-tl-chip-dot" style="background:${p.color}"></span>${escapeHtml(t.name)}</button>`;
+              }).join('')
+            ).join('')
+          }</div>`
+        : '';
+
+      // dashed hour gridlines (09:00–18:00) spanning every lane
+      let hlines = '';
+      for (let h = 9; h <= 18; h++){
+        const t = dayStartMs + h * HOUR;
+        if (t >= rangeStart && t <= rangeEnd) hlines += `<div class="tk-tl-hline" style="left:${pct(t)}%"></div>`;
+      }
+      const gridlinesHtml = hlines ? `<div class="tk-tl-gridlines" aria-hidden="true"><div class="tk-tl-gridlines-track">${hlines}</div></div>` : '';
+
       timeline = `<div class="tk-tl" id="tk-today-tl">
-        ${lanes}
+        ${paletteHtml}
+        <div class="tk-tl-lanes">${gridlinesHtml}${lanes}</div>
         <div class="tk-tl-row tk-tl-axis"><div class="tk-tl-label"></div><div class="tk-tl-track">${ticks}</div></div>
       </div>`;
     }
@@ -1523,6 +1580,7 @@
             <div>
               <label>Date</label>
               <input class="tk-input" type="date" id="tk-manual-date" value="${manualPrefill ? manualPrefill.date : fmtDateInput(new Date())}"/>
+              <span class="tk-date-hint" id="tk-manual-date-hint"></span>
             </div>
             <div>
               <label>Start</label>
@@ -1685,6 +1743,10 @@
     root.querySelectorAll('#tk-today-tl .tk-tl-track[data-lane]').forEach(tr => {
       tr.addEventListener('dblclick', e => openHoleEntry(tr, e));
     });
+    // drag a palette chip onto the timeline to drop a new block
+    root.querySelectorAll('#tk-today-tl .tk-tl-chip').forEach(chip => {
+      chip.addEventListener('pointerdown', e => startPaletteDrag(e, chip));
+    });
     root.querySelectorAll('[data-save-entry]').forEach(el => el.addEventListener('click', () => {
       const id = el.getAttribute('data-save-entry');
       const row = root.querySelector('[data-edit-row="'+id+'"]');
@@ -1718,6 +1780,14 @@
     if (manualToggle) manualToggle.addEventListener('click', () => { manualFormOpen = !manualFormOpen; manualPrefill = null; render(); });
     const manualProjSel = document.getElementById('tk-manual-project');
     if (manualProjSel) manualProjSel.addEventListener('change', () => { manualProjId(manualProjSel.value); });
+    const manualDate = document.getElementById('tk-manual-date');
+    const manualDateHint = document.getElementById('tk-manual-date-hint');
+    if (manualDate && manualDateHint){
+      const syncHint = () => { manualDateHint.textContent = fmtDateHint(manualDate.value); };
+      syncHint();
+      manualDate.addEventListener('input', syncHint);
+      manualDate.addEventListener('change', syncHint);
+    }
     const manualSave = document.getElementById('tk-manual-save');
     if (manualSave) manualSave.addEventListener('click', () => {
       addManualEntry(
@@ -1847,6 +1917,75 @@
     render();
     const f = root.querySelector('.tk-manual-form');
     if (f) f.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  }
+
+  // --- Today's timeline: drag a palette chip onto it to log a new block -------
+  // The chip carries project+task; the drop's x sets the start time and the block
+  // lands in its own project's lane (y/row ignored), then it's slidable like any
+  // other entry. Global collision is reused: the block clamps into the free gap
+  // around the drop point; dropping onto busy time (or a <5-min gap) is rejected.
+  const DROP_DEFAULT_MS = 30 * 60000; // fresh dropped block is 30 min, then adjustable
+  function startPaletteDrag(ev, chip){
+    ev.preventDefault();
+    const pid = chip.getAttribute('data-drop-pid'), tid = chip.getAttribute('data-drop-tid');
+    const ghost = document.createElement('div');
+    ghost.className = 'tk-tl-chip-ghost invalid';
+    ghost.style.background = chip.style.background;
+    ghost.style.color = chip.style.color;
+    ghost.style.fontFamily = getComputedStyle(chip).fontFamily; // ghost lives under <body>, outside #app-root's font
+    ghost.textContent = chip.textContent.trim();
+    document.body.appendChild(ghost);
+    document.body.style.userSelect = 'none';
+    document.body.style.cursor = 'grabbing';
+    let guide = null, cand = null; // cand = {track, rangeStart, span, start}
+    const snap = ms => Math.round(ms / 60000) * 60000;
+    const clearGuide = () => { if (guide){ guide.remove(); guide = null; } };
+
+    function onMove(e){
+      ghost.style.left = e.clientX + 'px';
+      ghost.style.top = e.clientY + 'px';
+      const under = document.elementFromPoint(e.clientX, e.clientY);
+      const track = under && under.closest('#tk-today-tl .tk-tl-track[data-range-start]');
+      if (!track){ clearGuide(); cand = null; ghost.classList.add('invalid'); return; }
+      ghost.classList.remove('invalid');
+      const rangeStart = +track.dataset.rangeStart, span = +track.dataset.span;
+      const rect = track.getBoundingClientRect();
+      const frac = Math.min(Math.max((e.clientX - rect.left) / rect.width, 0), 1);
+      const start = snap(rangeStart + frac * span);
+      cand = { track, rangeStart, span, start };
+      if (!guide || guide.parentElement !== track){ clearGuide(); guide = document.createElement('div'); guide.className = 'tk-tl-guide'; track.appendChild(guide); }
+      guide.style.left = ((start - rangeStart) / span) * 100 + '%';
+      guide.setAttribute('data-t', new Date(start).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false }));
+    }
+    function onUp(){
+      document.removeEventListener('pointermove', onMove);
+      document.removeEventListener('pointerup', onUp);
+      ghost.remove(); clearGuide();
+      document.body.style.userSelect = ''; document.body.style.cursor = '';
+      if (cand) dropNewBlock(cand.track, pid, tid, cand.start);
+    }
+    document.addEventListener('pointermove', onMove);
+    document.addEventListener('pointerup', onUp);
+  }
+
+  function dropNewBlock(track, pid, tid, start){
+    const rangeStart = +track.dataset.rangeStart, span = +track.dataset.span, rangeEnd = rangeStart + span;
+    const MIN_DROP = 5 * 60000; // need at least 5 free minutes to place a block
+    const occ = [...document.querySelectorAll('#tk-today-tl .tk-tl-block[data-start]')]
+      .map(b => ({ s:+b.getAttribute('data-start'), e:+b.getAttribute('data-end') }));
+    if (occ.some(o => start >= o.s && start < o.e)) return rejectDrop(track); // dropped onto busy time
+    let gapStart = rangeStart, gapEnd = rangeEnd; // the global hole around the drop point
+    occ.forEach(o => { if (o.e <= start && o.e > gapStart) gapStart = o.e; if (o.s >= start && o.s < gapEnd) gapEnd = o.s; });
+    const s = Math.max(start, gapStart);
+    const en = Math.min(s + DROP_DEFAULT_MS, gapEnd);
+    if (en - s < MIN_DROP) return rejectDrop(track);
+    entries.push({ id: uid(), projectId: pid, taskId: tid, start: new Date(s).toISOString(), end: new Date(en).toISOString(), note: '' });
+    storageSet('tk-entries', entries);
+    render();
+  }
+  function rejectDrop(track){
+    track.classList.add('tk-tl-drop-reject');
+    setTimeout(() => track.classList.remove('tk-tl-drop-reject'), 320);
   }
 
   function escapeHtml(s){
