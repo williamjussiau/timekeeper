@@ -408,7 +408,7 @@
   const STALE_REASK_HOURS = 2;    // after "keep it running", ask again about the same timer this much later
   // Cat mascot images live in the embedded-assets block at the end of this script (CAT_IMG / CAT_IDLE_IMG).
   let calMonthOffset = 0; // 0 = current month, -1 = previous, …
-  let logCollapsed = true; // Log panel folded by default (it gets long)
+  let logCollapsed = true; // Log panel starts folded on every load (it gets long); not persisted
   let ackLong = {};        // {entryId: true} for long entries the user marked as normal (warning dismissed)
   let manualFormOpen = false;
   let manualProjectId = null; // which project is selected in the manual-entry form
@@ -448,7 +448,6 @@
     activeTimer = storageGet('tk-active-timer') || null;
     collapsed = storageGet('tk-collapsed') || {};
     doneCollapsed = storageGet('tk-done-collapsed') || {};
-    { const lc = storageGet('tk-log-collapsed'); logCollapsed = (lc === null ? true : lc); }
     ackLong = storageGet('tk-ack-long') || {};
     dailyTargetHours = storageGet('tk-daily-target') || 0;
     lastTask = storageGet('tk-last-task') || null;
@@ -867,8 +866,7 @@
     storageSet('tk-collapsed', collapsed); render();
   }
   function toggleLog(){
-    logCollapsed = !logCollapsed;
-    storageSet('tk-log-collapsed', logCollapsed); render();
+    logCollapsed = !logCollapsed; render();
   }
   function shiftMonth(delta){ calMonthOffset += delta; render(); }
   function setDailyTarget(hours){
@@ -1794,7 +1792,7 @@
     // click a timeline block to jump straight to editing that entry (unfolds the Log)
     root.querySelectorAll('.tk-tl-block[data-entry]').forEach(el => el.addEventListener('click', () => {
       editingEntryId = el.getAttribute('data-entry');
-      if (logCollapsed){ logCollapsed = false; storageSet('tk-log-collapsed', false); }
+      logCollapsed = false;
       render();
       const row = root.querySelector('[data-edit-row="'+editingEntryId+'"]');
       if (row) row.scrollIntoView({ behavior: 'smooth', block: 'center' });
@@ -1986,7 +1984,7 @@
                       start: fmtTimeInput(new Date(gapStart)), end: fmtTimeInput(new Date(gapEnd)) };
     manualProjectId = manualPrefill.projectId;
     manualFormOpen = true;
-    if (logCollapsed){ logCollapsed = false; storageSet('tk-log-collapsed', false); }
+    logCollapsed = false;
     render();
     const f = root.querySelector('.tk-manual-form');
     if (f) f.scrollIntoView({ behavior: 'smooth', block: 'center' });
